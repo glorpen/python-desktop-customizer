@@ -40,9 +40,7 @@ class LayoutManager(object):
         for crtc in output_info.crtcs:
             crtc_info = self.ext_r.GetCrtcInfo(crtc, 0).reply()
             # TODO: more checking if crt is usable
-            # TODO: what if 
             if crtc_info.num_outputs == 0 and output in crtc_info.possible.list:
-                print(crtc_info.__dict__)
                 return crtc
         # error if no crtc found?
 
@@ -61,67 +59,57 @@ class LayoutManager(object):
         for output in screen_resources.outputs:
             output_info = self.ext_r.GetOutputInfo(output, 0).reply()
             
-            # skip outputs without monitors
-            if output_info.connection != 0:
-                continue
-            
-            e = self.get_edid_for_output(output)
-            
-            # TODO: disable unused crtcs (empty mode, no outputs)
-
-            ts = int(time.time())
-            # xcffib.randr.Rotation.Rotate_270
-            # xcffib.randr.Rotation.Rotate_0
-            
-            preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
-
             rotation = xcffib.randr.Rotation.Rotate_0
             primary = False
             pos = [0, 0]
             mode = 0
             matched = False
-
-            if e.name == "CB240HYK":
-                rotation = xcffib.randr.Rotation.Rotate_90
-                pos = [3840, 0]
-                mode = preferred_modes[0].id
-                matched = True
-            elif e.name == "XV273K":
-                # screen_dimensions[0] += output_info.mm_width
-                # screen_dimensions[1] += output_info.mm_height
-                
-                # preferred_modes[0]
-
-                primary = True
-                pos = [0, 960]
-                mode = preferred_modes[0].id
-                matched = True
-
-            # did not find a way to set crtc to "null"
-            # so later we always find available crtc to use
-            # but do not set outputs
             crtc = None
-            crtc_outputs = []
 
+            # skip outputs without monitors
+            if output_info.connection == 0:
+                e = self.get_edid_for_output(output)
+
+                if e.name == "CB240HYK":
+                    rotation = xcffib.randr.Rotation.Rotate_90
+                    pos = [3840, 0]
+                    matched = True
+                elif e.name == "XV273K":
+                    # screen_dimensions[0] += output_info.mm_width
+                    # screen_dimensions[1] += output_info.mm_height
+                    
+                    # preferred_modes[0]
+
+                    primary = True
+                    pos = [0, 960]
+                    matched = True
+                
+                if matched:
+                    preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
+                    mode = preferred_modes[0].id
+
+            # 0 is NULL
             if output_info.crtc > 0:
                 crtc = output_info.crtc
-            else:
+            elif matched:
                 crtc = self.get_crt_for_output(output, output_info)
 
+            crtc_outputs = []
             if matched:
                 crtc_outputs.append(output)
 
-            self.ext_r.SetCrtcConfig(
-                crtc,
-                ts,
-                ts, # crtc_info.timestamp,
-                pos[0],
-                pos[1],
-                mode,
-                rotation,
-                len(crtc_outputs),
-                crtc_outputs
-            ).reply()
+            if crtc is not None:
+                self.ext_r.SetCrtcConfig(
+                    crtc,
+                    0,
+                    0,
+                    pos[0],
+                    pos[1],
+                    mode,
+                    rotation,
+                    len(crtc_outputs),
+                    crtc_outputs
+                ).reply()
 
             if primary:
                 self.ext_r.SetOutputPrimary(root, output)
