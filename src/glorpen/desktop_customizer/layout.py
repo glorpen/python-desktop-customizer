@@ -1,121 +1,142 @@
 import os
 import xcffib
 import xcffib.xproto
-
-import xcffib.randr
-conn = xcffib.connect(os.environ.get("DISPLAY"))
-ext_r = conn(xcffib.randr.key)
-
-root = conn.get_setup().roots[0].root
-
-def _get_atom_id(name):
-    return conn.core.InternAtom(False, len(name), name).reply().atom
-
-ATOM_EDID = _get_atom_id("EDID")
-
-# import pdb
-# pdb.set_trace()
-
 import pyedid.edid
 import pyedid.helpers.registry
 import time
+import xcffib.randr
 
-reg = pyedid.helpers.registry.Registry()
+class EdidReader(object):
+    def __init__(self):
+        super()
 
-screen_resources = ext_r.GetScreenResources(root).reply()
-screen_modes = dict((m.id, m) for m in screen_resources.modes)
+        self.reg = pyedid.helpers.registry.Registry()
+        # TODO: read pci.ids
 
-# TODO: grab server when changing stuff to accumulate events
-conn.core.GrabServer()
+    def parse(self, data):
+        return pyedid.edid.Edid(data, self.reg)
 
-# for monitor in ext_r.GetMonitors(root, 1).reply().monitors:
-    # name = conn.core.GetAtomName(monitor.name).reply().name.raw.decode()
-for output in screen_resources.outputs:
-    output_info = ext_r.GetOutputInfo(output, 0).reply()
+
+class LayoutManager(object):
+    def _get_atom_id(self, name):
+        return self.conn.core.InternAtom(False, len(name), name).reply().atom
     
-    # skip outputs without monitors
-    if output_info.connection != 0:
-        continue
-    
-    print(output_info.__dict__)
-    # 32 as in 32 * uin32 = 128 edid bytes
-    d = bytes(ext_r.GetOutputProperty(output, ATOM_EDID, xcffib.xproto.Atom.Any, 0, 32, False, False).reply().data)
-    e = pyedid.edid.Edid(d, reg)
-    print(e.serial, e.name)
-    #print(bytes(r.data))
-    
-    # TODO: find crtc when screen is disabled
-    print(output_info.crtc)
+    def __init__(self):
+        super()
+        self.edid = EdidReader()
 
-    crtc_info = None
-    crtc = None
-    crtc_outputs = []
+    def connect(self):
+        self.conn = xcffib.connect(os.environ.get("DISPLAY"))
+        self.ext_r = self.conn(xcffib.randr.key)
+        
+        self._ATOM_EDID = self._get_atom_id("EDID")
 
-    if output_info.crtc:
-        crtc = output_info.crtc
-        crtc_outputs.append(output)
-    else:
-        for crtc_id in output_info.crtcs:
-            crtc_info = ext_r.GetCrtcInfo(crtc_id, 0).reply()
+    def get_edid_for_output(self, output):
+        # 32 as in 32 * uin32 = 128 edid bytes
+        d = bytes(self.ext_r.GetOutputProperty(output, self._ATOM_EDID, xcffib.xproto.Atom.Any, 0, 32, False, False).reply().data)
+        return self.edid.parse(d)
+    
+    def get_crt_for_output(self, output, output_info):
+        for crtc in output_info.crtcs:
+            crtc_info = self.ext_r.GetCrtcInfo(crtc, 0).reply()
             # TODO: more checking if crt is usable
+            # TODO: what if 
             if crtc_info.num_outputs == 0 and output in crtc_info.possible.list:
-                crtc = crtc_id
+                print(crtc_info.__dict__)
+                return crtc
+        # error if no crtc found?
+
+    def apply(self):
+        root = self.conn.get_setup().roots[0].root
+
+        screen_resources = self.ext_r.GetScreenResources(root).reply()
+        screen_modes = dict((m.id, m) for m in screen_resources.modes)
+
+        screen_size = [0,0]
+        screen_dimensions = [0,0]
+
+        # grab server when changing stuff to accumulate events
+        self.conn.core.GrabServer()
+
+        for output in screen_resources.outputs:
+            output_info = self.ext_r.GetOutputInfo(output, 0).reply()
+            
+            # skip outputs without monitors
+            if output_info.connection != 0:
+                continue
+            
+            e = self.get_edid_for_output(output)
+            
+            # TODO: disable unused crtcs (empty mode, no outputs)
+
+            ts = int(time.time())
+            # xcffib.randr.Rotation.Rotate_270
+            # xcffib.randr.Rotation.Rotate_0
+            
+            preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
+
+            rotation = xcffib.randr.Rotation.Rotate_0
+            primary = False
+            pos = [0, 0]
+            mode = 0
+            matched = False
+
+            if e.name == "CB240HYK":
+                rotation = xcffib.randr.Rotation.Rotate_90
+                pos = [3840, 0]
+                mode = preferred_modes[0].id
+                matched = True
+            elif e.name == "XV273K":
+                # screen_dimensions[0] += output_info.mm_width
+                # screen_dimensions[1] += output_info.mm_height
+                
+                # preferred_modes[0]
+
+                primary = True
+                pos = [0, 960]
+                mode = preferred_modes[0].id
+                matched = True
+
+            # did not find a way to set crtc to "null"
+            # so later we always find available crtc to use
+            # but do not set outputs
+            crtc = None
+            crtc_outputs = []
+
+            if output_info.crtc > 0:
+                crtc = output_info.crtc
+            else:
+                crtc = self.get_crt_for_output(output, output_info)
+
+            if matched:
                 crtc_outputs.append(output)
-                break
-        # error if not crtc found?
-    
-    # TODO: disable unused crtcs (empty mode, no outputs)
 
-    ts = int(time.time())
-    # xcffib.randr.Rotation.Rotate_270
-    # xcffib.randr.Rotation.Rotate_0
-    
-    preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
+            self.ext_r.SetCrtcConfig(
+                crtc,
+                ts,
+                ts, # crtc_info.timestamp,
+                pos[0],
+                pos[1],
+                mode,
+                rotation,
+                len(crtc_outputs),
+                crtc_outputs
+            ).reply()
 
-    rotation = xcffib.randr.Rotation.Rotate_0
-    primary = False
-    pos = [0, 0]
-    mode = None
+            if primary:
+                self.ext_r.SetOutputPrimary(root, output)
 
-    if e.serial == "xxxx":
-        rotation = xcffib.randr.Rotation.Rotate_90
-        pos = [3840, 0]
-        mode = preferred_modes[0].id
-        # print(crtc_info.__dict__)
-        # print(output_info.__dict__)
-    elif e.serial == 123:
-        primary = True
-        pos = [0, 960]
-        mode = preferred_modes[0].id
+            # print(z.status)
+            #xcffib.randr.Rotation
 
-# --output DisplayPort-1 --mode 3840x2160 --rotate left --pos 3840x0 \
-# --output DisplayPort-0 --mode 3840x2160 --pos 0x960 --primary
-    # TODO: transform? width/height of rotated monitor
+        # TODO: calculate ScreenSize
+        # TODO: calculate physical size
+        self.ext_r.SetScreenSize(root, 6000, 3840, 1100, 527)
 
-    # print(crtc_info)
+        self.conn.flush()
+        self.conn.core.UngrabServer()
+        self.conn.disconnect()
 
-    z = ext_r.SetCrtcConfig(
-        crtc,
-        ts,
-        ts, # crtc_info.timestamp,
-        pos[0],
-        pos[1],
-        mode,
-        rotation,
-        len(crtc_outputs),
-        crtc_outputs
-    ).reply()
-
-    if primary:
-        ext_r.SetOutputPrimary(root, output)
-
-    # print(z.status)
-    #xcffib.randr.Rotation
-
-# TODO: calculate ScreenSize
-# TODO: calculate physical size
-ext_r.SetScreenSize(root, 6000, 3840, 1100, 527)
-
-conn.flush()
-conn.core.UngrabServer()
-conn.disconnect()
+l = LayoutManager()
+l.connect()
+l.apply()
