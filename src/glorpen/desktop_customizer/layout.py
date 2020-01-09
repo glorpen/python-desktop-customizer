@@ -65,9 +65,6 @@ for output in screen_resources.outputs:
         # error if not crtc found?
     
     # TODO: disable unused crtcs (empty mode, no outputs)
-    # TODO: calculate ScreenSize
-    # TODO: calculate physical size
-    ext_r.SetScreenSize(root, 6000, 3840, 1100, 527)
 
     ts = int(time.time())
     # xcffib.randr.Rotation.Rotate_270
@@ -114,6 +111,10 @@ for output in screen_resources.outputs:
 
     # print(z.status)
     #xcffib.randr.Rotation
+
+# TODO: calculate ScreenSize
+# TODO: calculate physical size
+ext_r.SetScreenSize(root, 6000, 3840, 1100, 527)
 
 conn.flush()
 conn.core.UngrabServer()
