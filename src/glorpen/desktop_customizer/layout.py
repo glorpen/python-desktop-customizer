@@ -1,3 +1,4 @@
+import os
 import xcffib
 import xcffib.xproto
 
@@ -72,23 +73,23 @@ for output in screen_resources.outputs:
     # xcffib.randr.Rotation.Rotate_270
     # xcffib.randr.Rotation.Rotate_0
     
+    preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
+
     rotation = xcffib.randr.Rotation.Rotate_0
     primary = False
     pos = [0, 0]
     mode = None
-    
-
-    preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
 
     if e.serial == "xxxx":
         rotation = xcffib.randr.Rotation.Rotate_90
         pos = [3840, 0]
+        mode = preferred_modes[0].id
         # print(crtc_info.__dict__)
         # print(output_info.__dict__)
-    else:
+    elif e.serial == 123:
         primary = True
         pos = [0, 960]
-    
+        mode = preferred_modes[0].id
 
 # --output DisplayPort-1 --mode 3840x2160 --rotate left --pos 3840x0 \
 # --output DisplayPort-0 --mode 3840x2160 --pos 0x960 --primary
@@ -102,7 +103,7 @@ for output in screen_resources.outputs:
         ts, # crtc_info.timestamp,
         pos[0],
         pos[1],
-        preferred_modes[0].id,
+        mode,
         rotation,
         len(crtc_outputs),
         crtc_outputs
