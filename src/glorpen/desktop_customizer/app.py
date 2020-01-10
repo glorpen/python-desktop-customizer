@@ -9,6 +9,7 @@ import struct
 import PIL
 import PIL.Image
 import PIL.ImageOps
+import xattr
 
 
 # w = 1024
@@ -108,22 +109,57 @@ class Monitor(object):
 class Picture(object):
     _req_mode = "RGBA"
 
-    def __init__(self, image, x=0, y=0):
+    _xattr_poi = "user.glorpen.wallapaper.poi"
+
+    def __init__(self, image, x=0, y=0, poi=None):
         super()
         self.x = x
         self.y = y
+        self.poi = poi
 
         self.image = image
     
     @classmethod
+    def get_attr_poi(cls, path):
+        try:
+            poi = xattr.getxattr(path, cls._xattr_poi)
+        except OSError:
+            return None
+
+        return [int(i) for i in poi.split(b"x")]
+
+    @classmethod
     def load(cls, path, x=0, y=0):
-        return cls(PIL.Image.open(path), x, y)
+        return cls(PIL.Image.open(path), x, y, poi=cls.get_attr_poi(path))
 
     def get_image(self, monitor):
         image = self.image if self.image.mode == self._req_mode else self.image.convert(self._req_mode)
 
-        # image = image.resize((monitor.width, monitor.height), PIL.Image.LANCZOS)
-        image = PIL.ImageOps.fit(image, (monitor.width, monitor.height), centering=(0.5, 0.5), method= PIL.Image.LANCZOS)
+        # find Point of Interest to later center on
+        poi = [0.5 * image.width, 0.5 * image.height]
+        if self.poi:
+            poi = self.poi
+
+        # we should take image dimension that is smallest
+        # and make it ratio value
+        ratio = min(image.width / monitor.width, image.height / monitor.height)
+
+        # numpy and multiplying arrays?
+        cropped_size = [round(ratio * monitor.width), round(ratio * monitor.height)]
+
+        # center cropped box on poi and crop image
+        # coords are based on original image
+        offset = [0, 0]
+        
+        for dim in [0, 1]:
+            half = cropped_size[dim] / 2
+            o = max(poi[dim] - half, 0)
+            overflow = max(cropped_size[dim] + o - image.size[dim], 0)
+            o -= overflow
+            offset[dim] = o
+
+        image = image.crop([offset[0], offset[1], offset[0]+cropped_size[0], offset[1]+cropped_size[1]])
+        image = image.resize((monitor.width, monitor.height), resample=PIL.Image.LANCZOS)
 
         return image
 
@@ -146,7 +182,6 @@ class PictureWriter(object):
     def get_monitors(self):
         ret = []
         for m in self.ext_x.QueryScreens().reply().screen_info:
-            print(dir(m))
             ret.append(Monitor(m.x_org, m.y_org, m.width, m.height))
         return ret
     
@@ -287,4 +322,4 @@ def asd():
     p.write()
     p.disconnect()
 
-# asd()
+asd()
