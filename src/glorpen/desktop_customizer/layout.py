@@ -5,6 +5,7 @@ import pyedid.edid
 import pyedid.helpers.registry
 import time
 import xcffib.randr
+import logging
 
 class EdidReader(object):
     def __init__(self):
@@ -24,6 +25,7 @@ class LayoutManager(object):
     def __init__(self):
         super()
         self.edid = EdidReader()
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def connect(self):
         self.conn = xcffib.connect(os.environ.get("DISPLAY"))
@@ -78,6 +80,7 @@ class LayoutManager(object):
             max_y = max(y, max_y)
 
             if info["primary"]:
+                # it probably doesn't matter so just use "DPI" from primary monitor
                 dim_ratio = info["dimensions"]["height"] / info["mode"]["height"]
         
         return max_x, max_y, int(max_x * dim_ratio), int(max_y * dim_ratio)
@@ -92,9 +95,8 @@ class LayoutManager(object):
         outputs_to_update = []
 
         # grab server when changing stuff to accumulate events
+        self.logger.debug("Grabbing server")
         self.conn.core.GrabServer()
-
-        # TODO: order: turn off crts, set screen size, configure crts, set primary
 
         for output in screen_resources.outputs:
             output_info = self.ext_r.GetOutputInfo(output, 0).reply()
@@ -132,6 +134,7 @@ class LayoutManager(object):
 
                     outputs_to_update.append({
                         "output": output,
+                        "output_name": output_info.name.raw.decode(),
                         "mode": {
                             "id": mode.id,
                             "width": mode.width,
@@ -147,21 +150,24 @@ class LayoutManager(object):
                         "primary": primary
                     })
                 else:
-                    # 0 is NULL
-                    if output_info.crtc > 0:
+                    # mark currently used crtc for disabling
+                    if output_info.crtc > 0: # 0 is NULL
                         crtcs_to_disable.append(output_info.crtc)
 
+        self.logger.debug("Disabling crtcs")
         for crtc in crtcs_to_disable:
             self.disable_crtc(crtc)
         
-        max_x, max_y, dim_x, dim_y = self.get_screen_sizes(outputs_to_update)
-        self.ext_r.SetScreenSize(root, max_x, max_y, dim_x, dim_y)
-
+        self.logger.debug("Updating crtcs")
         for info in outputs_to_update:
             crtc = info["crtc"]
             if crtc is None:
                 crtc = self.get_crt_for_output(info["output"])
-            crtc_outputs = [ info["output"] ]
+
+                if crtc is None:
+                    raise Exception("No crtc found for output %s" % info["output_name"])
+            
+            crtc_outputs = [info["output"]]
 
             self.ext_r.SetCrtcConfig(
                 crtc,
@@ -176,11 +182,21 @@ class LayoutManager(object):
             ).reply()
 
             if info["primary"]:
+                self.logger.debug("Setting primary output to %s", info["output_name"])
                 self.ext_r.SetOutputPrimary(root, info["output"])
 
+        max_x, max_y, dim_x, dim_y = self.get_screen_sizes(outputs_to_update)
+        self.logger.debug("Setting screen size to %dx%d (%dmm x %dmm)", max_x, max_y, dim_x, dim_y)
+        self.ext_r.SetScreenSize(root, max_x, max_y, dim_x, dim_y)
+
         self.conn.flush()
+
+        self.logger.debug("Ungrabbing server")
         self.conn.core.UngrabServer()
+
         self.conn.disconnect()
+
+logging.basicConfig(level=logging.DEBUG)
 
 l = LayoutManager()
 l.connect()
