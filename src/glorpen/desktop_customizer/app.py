@@ -3,7 +3,6 @@
 import xcffib
 import xcffib.xproto
 import xcffib.xinerama as xinerama
-# import xcffib.bigreq as bigrequest
 import os
 import struct
 import PIL
@@ -11,93 +10,6 @@ import PIL.Image
 import PIL.ImageOps
 import xattr
 import logging
-
-
-# w = 1024
-# h = 1024
-
-# conn = xcffib.connect(display=os.environ.get("DISPLAY"))
-# ext_x = conn(xinerama.key)
-# # ext_b = conn(bigrequest.key)
-
-# setup = conn.get_setup()
-
-# def get_atom_id(name):
-#     return conn.core.InternAtom(False, len(name), name).reply().atom
-
-# _XROOTPMAP_ID = get_atom_id("_XROOTPMAP_ID")
-# ESETROOT_PMAP_ID = get_atom_id("ESETROOT_PMAP_ID")
-
-# XCB_CW_BACK_PIXMAP = xcffib.xproto.CW.BackPixmap
-# XCB_PROP_MODE_REPLACE = xcffib.xproto.PropMode.Replace
-# XCB_ATOM_PIXMAP = xcffib.xproto.Atom.PIXMAP
-
-# # import pdb; pdb.set_trace()
-
-# monitors = []
-# for m in ext_x.QueryScreens().reply().screen_info:
-#     print(dir(m))
-#     monitors.append((m.x_org, m.y_org, m.width, m.height))
-
-# print(monitors)
-
-# r = setup.roots[0]
-
-# root = r.root
-# depth = r.root_depth
-# visual = r.root_visual
-# width = r.width_in_pixels
-# height = r.height_in_pixels
-
-# # just in case it differs
-# old_pixmaps = set()
-# for i in [_XROOTPMAP_ID, ESETROOT_PMAP_ID]:
-#     old_pixmaps.add(conn.core.GetPropertyUnchecked(False, root, i, XCB_ATOM_PIXMAP, 0, 1).reply().value.to_atoms()[0])
-
-# # import pdb; pdb.set_trace()
-
-# max_req_length = conn.get_maximum_request_length() * 4 # counted as ints
-
-# # https://github.com/Elv13/awesome/blob/master/root.c
-# picture = conn.generate_id()
-# gc = conn.generate_id()
-
-# conn.core.CreateGC(gc, root, 0, None)
-
-
-# conn.core.CreatePixmap(depth, picture, root, width, height)
-
-# block_width = 2048
-# block_height = 2048
-# image = Image.new('RGBA', (block_width, block_height), color = 'blue')
-# data = image.tobytes('raw', 'BGRA')
-
-# print(len(data))
-# # 4194303
-
-
-# # import pdb; pdb.set_trace()
-
-# conn.core.PutImage(xcffib.xproto.ImageFormat.ZPixmap, picture, gc, block_width, block_height, 2000, 2000, 0, depth, len(data), data)
-# conn.core.FreeGC(gc)
-
-# conn.core.ChangeWindowAttributes(root, XCB_CW_BACK_PIXMAP, [picture])
-# conn.core.ClearArea(0, root, 0,0,0,0)
-
-# conn.core.ChangeProperty(XCB_PROP_MODE_REPLACE, root, _XROOTPMAP_ID, XCB_ATOM_PIXMAP, 32, 1, [picture])
-# conn.core.ChangeProperty(XCB_PROP_MODE_REPLACE, root, ESETROOT_PMAP_ID, XCB_ATOM_PIXMAP, 32, 1, [picture])
-
-# # free old pixmaps
-# for p in old_pixmaps:
-#     conn.core.KillClient(p)
-
-
-# # conn.core.FreePixmap(a)
-
-# # don't remove pixmap after disconnecting
-# conn.core.SetCloseDownMode(xcffib.xproto.CloseDown.RetainPermanent)
-# conn.flush()
-# conn.disconnect()
 
 class Monitor(object):
     def __init__(self, x, y, width, height):
