@@ -10,6 +10,7 @@ import PIL
 import PIL.Image
 import PIL.ImageOps
 import xattr
+import logging
 
 
 # w = 1024
@@ -109,13 +110,17 @@ class Monitor(object):
 class Picture(object):
     _req_mode = "RGBA"
 
-    _xattr_poi = "user.glorpen.wallapaper.poi"
+    _xattr_poi = "user.glorpen.wallpaper.poi"
 
-    def __init__(self, image, x=0, y=0, poi=None):
+    def __init__(self, image, path, x=0, y=0, poi=None):
         super()
+
+        self.logger = logging.getLogger(self.__class__.__name__)
+
         self.x = x
         self.y = y
         self.poi = poi
+        self.path = path
 
         self.image = image
     
@@ -123,14 +128,14 @@ class Picture(object):
     def get_attr_poi(cls, path):
         try:
             poi = xattr.getxattr(path, cls._xattr_poi)
-        except OSError:
+        except OSError as e:
             return None
 
         return [int(i) for i in poi.split(b"x")]
 
     @classmethod
     def load(cls, path, x=0, y=0):
-        return cls(PIL.Image.open(path), x, y, poi=cls.get_attr_poi(path))
+        return cls(PIL.Image.open(path), path, x, y, poi=cls.get_attr_poi(path))
 
     def get_image(self, monitor):
         image = self.image if self.image.mode == self._req_mode else self.image.convert(self._req_mode)
@@ -139,6 +144,8 @@ class Picture(object):
         poi = [0.5 * image.width, 0.5 * image.height]
         if self.poi:
             poi = self.poi
+        
+        self.logger.debug("POI is at %r on %r", poi, monitor)
 
         # we should take image dimension that is smallest
         # and make it ratio value
@@ -162,11 +169,15 @@ class Picture(object):
         image = image.resize((monitor.width, monitor.height), resample=PIL.Image.LANCZOS)
 
         return image
+    
+    def __repr__(self):
+        return "<%s: %r>" % (self.__class__.__qualname__, self.path)
 
 class PictureWriter(object):
 
     def __init__(self):
         super()
+        self.logger = logging.getLogger(self.__class__.__name__)
         self._pictures = {}
 
     def connect(self, display=None):
@@ -245,6 +256,7 @@ class PictureWriter(object):
         self.conn.core.FreeGC(gc)
 
     def set_picture(self, picture, monitor):
+        self.logger.debug("Setting %r on %r", picture, monitor)
         self._pictures[monitor] = picture
 
     def write(self):
@@ -322,4 +334,5 @@ def asd():
     p.write()
     p.disconnect()
 
+logging.basicConfig(level=logging.DEBUG)
 asd()
