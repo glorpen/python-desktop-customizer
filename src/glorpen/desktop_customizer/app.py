@@ -13,7 +13,7 @@ import logging
 
 class Monitor(object):
     def __init__(self, x, y, width, height):
-        super()
+        super().__init__()
         self.x = x
         self.y = y
         self.width = width
@@ -22,32 +22,18 @@ class Monitor(object):
 class Picture(object):
     _req_mode = "RGBA"
 
-    _xattr_poi = "user.glorpen.wallpaper.poi"
+    poi = None
+    image = None
 
-    def __init__(self, image, path, x=0, y=0, poi=None):
-        super()
+    # TODO: is_offensive
+    # TODO: is_safe
 
-        self.logger = logging.getLogger(self.__class__.__name__)
-
-        self.x = x
-        self.y = y
-        self.poi = poi
-        self.path = path
-
-        self.image = image
+    def __init__(self):
+        super().__init__()
+        self.logger = logging.getLogger(self.__class__.__qualname__)
     
-    @classmethod
-    def get_attr_poi(cls, path):
-        try:
-            poi = xattr.getxattr(path, cls._xattr_poi)
-        except OSError as e:
-            return None
-
-        return [int(i) for i in poi.split(b"x")]
-
-    @classmethod
-    def load(cls, path, x=0, y=0):
-        return cls(PIL.Image.open(path), path, x, y, poi=cls.get_attr_poi(path))
+    def load(self):
+        raise NotImplementedError()
 
     def get_image(self, monitor):
         image = self.image if self.image.mode == self._req_mode else self.image.convert(self._req_mode)
@@ -81,6 +67,22 @@ class Picture(object):
         image = image.resize((monitor.width, monitor.height), resample=PIL.Image.LANCZOS)
 
         return image
+
+class FilePicture(Picture):
+    _xattr_poi = "user.glorpen.wallpaper.poi"
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+    
+    def load(self):
+        self.image = PIL.Image.open(self.path)
+
+        try:
+            poi = xattr.getxattr(self.path, self._xattr_poi)
+            self.poi = [int(i) for i in poi.split(b"x")]
+        except OSError:
+            pass
     
     def __repr__(self):
         return "<%s: %r>" % (self.__class__.__qualname__, self.path)
@@ -88,7 +90,7 @@ class Picture(object):
 class PictureWriter(object):
 
     def __init__(self):
-        super()
+        super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
         self._pictures = {}
 
@@ -228,7 +230,7 @@ def get_images():
     ret = set()
     for root, _dirs, files in os.walk("/home/glorpen/wallpapers/"):
         for file in files:
-            ret.add(os.path.join(root, file))
+            ret.add(FilePicture(os.path.join(root, file)))
     return ret
 
 import random
@@ -241,7 +243,8 @@ def asd():
     images = random.sample(get_images(), len(mons))
 
     for m, img in itertools.zip_longest(mons, images):
-       p.set_picture(Picture.load(img), m)
+        img.load()
+        p.set_picture(img, m)
 
     p.write()
     p.disconnect()
