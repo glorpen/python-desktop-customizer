@@ -9,7 +9,7 @@ import logging
 
 class EdidReader(object):
     def __init__(self):
-        super()
+        super().__init__()
 
         self.reg = pyedid.helpers.registry.Registry()
         # TODO: read pci.ids
@@ -23,9 +23,13 @@ class LayoutManager(object):
         return self.conn.core.InternAtom(False, len(name), name).reply().atom
     
     def __init__(self):
-        super()
+        super().__init__()
         self.edid = EdidReader()
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.layouts = []
+    
+    def add_layout(self, layout):
+        self.layouts.append(layout)
 
     def connect(self):
         self.conn = xcffib.connect(os.environ.get("DISPLAY"))
@@ -50,6 +54,7 @@ class LayoutManager(object):
         # error if no crtc found?
 
     def disable_crtc(self, crtc):
+        self.logger.debug("Disabling crtc %r", crtc)
         self.ext_r.SetCrtcConfig(
             crtc,
             0,
@@ -61,6 +66,10 @@ class LayoutManager(object):
             0,
             []
         ).reply()
+    
+    def disable_crtcs(self, crtcs):
+        for crtc in crtcs:
+            self.disable_crtc(crtc)
     
     def get_screen_sizes(self, crtc_infos):
         """Returns max width and height in pixels and
@@ -85,79 +94,76 @@ class LayoutManager(object):
         
         return max_x, max_y, int(max_x * dim_ratio), int(max_y * dim_ratio)
 
-    def apply(self):
-        root = self.conn.get_setup().roots[0].root
+    def gather_output_data(self, screen_resources):
+        outputs_data = []
+        for output in screen_resources.outputs:
+            output_info = self.ext_r.GetOutputInfo(output, 0).reply()
+            
+            # skip outputs without monitors
+            if output_info.connection == 0:
+                e = self.get_edid_for_output(output)
 
-        screen_resources = self.ext_r.GetScreenResources(root).reply()
+                outputs_data.append({
+                    "edid": e,
+                    "info": output_info,
+                    "output": output
+                })
+        return outputs_data
+
+    def find_layout(self, outputs_data):
+        edids = dict([i["output"], i["edid"]] for i in outputs_data)
+
+        for l in self.layouts:
+            if l.detect_by_edid(edids):
+                return l
+
+    def get_configs_for_layout(self, layout, outputs_data, screen_resources):
         screen_modes = dict((m.id, m) for m in screen_resources.modes)
 
         crtcs_to_disable = []
         outputs_to_update = []
 
-        # grab server when changing stuff to accumulate events
-        self.logger.debug("Grabbing server")
-        self.conn.core.GrabServer()
+        for od in outputs_data:
+            output = od["output"]
+            output_info = od["info"]
 
-        for output in screen_resources.outputs:
-            output_info = self.ext_r.GetOutputInfo(output, 0).reply()
+            placement = layout.get_placement_for_output(output)
             
-            rotation = xcffib.randr.Rotation.Rotate_0
-            primary = False
-            pos = [0, 0]
-            mode = 0
-            matched = False
+            if placement:
+                # output_info.num_preferred means modes[0:num]
+                # preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
+                # mode = preferred_modes[0].id
 
-            # skip outputs without monitors
-            if output_info.connection == 0:
-                e = self.get_edid_for_output(output)
+                mode = screen_modes[output_info.modes[0]]
 
-                if e.name == "CB240HYK":
-                    rotation = xcffib.randr.Rotation.Rotate_90
-                    pos = [3840, 0]
-                    matched = True
-                elif e.name == "XV273K":
-                    # screen_dimensions[0] += output_info.mm_width
-                    # screen_dimensions[1] += output_info.mm_height
-                    
-                    # preferred_modes[0]
-
-                    primary = True
-                    pos = [0, 960]
-                    matched = True
-                
-                if matched:
-                    # output_info.num_preferred means modes[0:num]
-                    # preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
-                    # mode = preferred_modes[0].id
-
-                    mode = screen_modes[output_info.modes[0]]
-
-                    outputs_to_update.append({
-                        "output": output,
-                        "output_name": output_info.name.raw.decode(),
-                        "mode": {
-                            "id": mode.id,
-                            "width": mode.width,
-                            "height": mode.height
-                        },
-                        "dimensions": {
-                            "width": output_info.mm_width,
-                            "height": output_info.mm_height,
-                        },
-                        "pos": pos,
-                        "rotation": rotation,
-                        "crtc": output_info.crtc if output_info.crtc > 0 else None,
-                        "primary": primary
-                    })
-                else:
-                    # mark currently used crtc for disabling
-                    if output_info.crtc > 0: # 0 is NULL
-                        crtcs_to_disable.append(output_info.crtc)
-
-        self.logger.debug("Disabling crtcs")
-        for crtc in crtcs_to_disable:
-            self.disable_crtc(crtc)
+                outputs_to_update.append({
+                    "output": output,
+                    "output_name": output_info.name.raw.decode(),
+                    "mode": {
+                        "id": mode.id,
+                        "width": mode.width,
+                        "height": mode.height
+                    },
+                    "dimensions": {
+                        "width": output_info.mm_width,
+                        "height": output_info.mm_height,
+                    },
+                    "pos": placement.position,
+                    "rotation": placement.rotation,
+                    "crtc": output_info.crtc if output_info.crtc > 0 else None,
+                    "primary": placement.primary
+                })
+            else:
+                # mark for disabling only currently used crtc
+                if output_info.crtc > 0: # 0 is NULL
+                    crtcs_to_disable.append(output_info.crtc)
         
+        return [
+            crtcs_to_disable,
+            outputs_to_update
+        ]
+
+    def apply_crtc_configs(self, outputs_to_update, root):
         self.logger.debug("Updating crtcs")
         for info in outputs_to_update:
             crtc = info["crtc"]
@@ -191,13 +197,87 @@ class LayoutManager(object):
 
         self.conn.flush()
 
-        self.logger.debug("Ungrabbing server")
-        self.conn.core.UngrabServer()
 
-        self.conn.disconnect()
+    def apply(self):
+        root = self.conn.get_setup().roots[0].root
+
+        # grab server when changing stuff to accumulate events
+        self.logger.debug("Grabbing server")
+        self.conn.core.GrabServer()
+
+        try:
+            screen_resources = self.ext_r.GetScreenResources(root).reply()
+            outputs_data = self.gather_output_data(screen_resources)
+            layout = self.find_layout(outputs_data)
+
+            if layout:
+                crtcs_to_disable, outputs_to_update = self.get_configs_for_layout(layout, outputs_data, screen_resources)
+                self.disable_crtcs(crtcs_to_disable)
+                self.apply_crtc_configs(outputs_to_update, root)
+            else:
+                self.logger.warning("No layout found")
+        finally:
+            self.logger.debug("Ungrabbing server")
+            self.conn.core.UngrabServer()
+
+            self.conn.disconnect()
+
+class Placement(object):
+    primary = False
+    rotation = xcffib.randr.Rotation.Rotate_0
+    
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.position = [0, 0]
+
+        self.__dict__.update(kwargs)
+    
+class Layout(object):
+    def __init__(self):
+        super().__init__()
+
+    def detect_by_edid(self, edids):
+        return False
+    
+    def get_placement_for_output(self, output):
+        raise NotImplementedError()
+
+class ExampleLayout(Layout):
+
+    mon_right = Placement(
+        rotation=xcffib.randr.Rotation.Rotate_90,
+        position=[3840, 0]
+    )
+    mon_main = Placement(
+        primary=True,
+        position=[0, 960]
+    )
+
+    def detect_by_edid(self, edids):
+        ret = {}
+        for output, e in edids.items():
+            if e.name == "CB240HYK":
+                ret["right"] = output
+            elif e.name == "XV273K":
+                ret["main"] = output
+        
+        self.detection_info = ret
+
+        return len(ret) == 2
+
+
+    def get_placement_for_output(self, output):
+        if self.detection_info["main"] == output:
+            return self.mon_main
+        elif self.detection_info["right"] == output:
+            return self.mon_right
+
 
 logging.basicConfig(level=logging.DEBUG)
 
+sl = ExampleLayout()
+
 l = LayoutManager()
+l.add_layout(sl)
 l.connect()
 l.apply()
