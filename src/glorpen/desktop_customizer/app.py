@@ -10,6 +10,8 @@ import PIL.Image
 import PIL.ImageOps
 import xattr
 import logging
+import random
+import itertools
 
 class Monitor(object):
     def __init__(self, x, y, width, height):
@@ -226,21 +228,35 @@ class PictureWriter(object):
     def disconnect(self):
         self.conn.disconnect()
 
-def get_images():
-    ret = set()
-    for root, _dirs, files in os.walk("/home/glorpen/wallpapers/"):
-        for file in files:
-            ret.add(FilePicture(os.path.join(root, file)))
-    return ret
+class ImageFinder(object):
+    def __init__(self, root_dir):
+        super().__init__()
 
-import random
-import itertools
+        self.root_dir = root_dir
+    
+    def get_images(self):
+        ret = set()
+        for root, _dirs, files in os.walk(self.root_dir):
+            for file in files:
+                ret.add(FilePicture(os.path.join(root, file)))
+        return tuple(ret)
 
+    def get_unique_random(self, count):
+        images = self.get_images()
+        images_count = len(images)
+        if images_count == 0:
+            raise Exception("No images found in %r" % self.root_dir)
+        if images_count < count:
+            return random.choices(images, k=count)
+        return random.sample(images, count)
+        
 def asd():
+    f = ImageFinder("/home/glorpen/wallpapers/")
+
     p = PictureWriter()
     p.connect()
     mons = p.get_monitors()
-    images = random.sample(get_images(), len(mons))
+    images = f.get_unique_random(len(mons))
 
     for m, img in itertools.zip_longest(mons, images):
         img.load()
