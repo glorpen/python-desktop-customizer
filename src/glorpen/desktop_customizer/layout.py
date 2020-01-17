@@ -17,6 +17,14 @@ class EdidReader(object):
     def parse(self, data):
         return pyedid.edid.Edid(data, self.reg)
 
+class LayoutHint(object):
+    edid_name = None
+    edid_serial = None
+    width = None
+    height = None
+    output_name = None
+    output = None
+
 
 class LayoutManager(object):
     def _get_atom_id(self, name):
@@ -95,6 +103,8 @@ class LayoutManager(object):
         return max_x, max_y, int(max_x * dim_ratio), int(max_y * dim_ratio)
 
     def gather_output_data(self, screen_resources):
+        screen_modes = dict((m.id, m) for m in screen_resources.modes)
+
         outputs_data = []
         for output in screen_resources.outputs:
             output_info = self.ext_r.GetOutputInfo(output, 0).reply()
@@ -103,23 +113,45 @@ class LayoutManager(object):
             if output_info.connection == 0:
                 e = self.get_edid_for_output(output)
 
+                # output_info.num_preferred means modes[0:num]
+                # preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
+                # mode = preferred_modes[0].id
+                mode = screen_modes[output_info.modes[0]]
+
                 outputs_data.append({
                     "edid": e,
                     "info": output_info,
-                    "output": output
+                    "output": output,
+                    "mode": {
+                        "id": mode.id,
+                        "width": mode.width,
+                        "height": mode.height,
+                    }
                 })
         return outputs_data
+    
+    def get_layout_hints(self, outputs_data):
+        hints = []
+        for od in outputs_data:
+            h = LayoutHint()
+            h.edid_name = od["edid"].name
+            h.edid_serial = od["edid"].serial
+            h.width = od["mode"]["width"]
+            h.height = od["mode"]["height"]
+            h.output = od["output"]
+            h.output_name = od["info"].name.raw.decode()
 
+            hints.append(h)
+        return hints
+    
     def find_layout(self, outputs_data):
-        edids = dict([i["output"], i["edid"]] for i in outputs_data)
+        hints = self.get_layout_hints(outputs_data)
 
         for l in self.layouts:
-            if l.detect_by_edid(edids):
+            if l.fit(hints):
                 return l
 
-    def get_configs_for_layout(self, layout, outputs_data, screen_resources):
-        screen_modes = dict((m.id, m) for m in screen_resources.modes)
-
+    def get_configs_for_layout(self, layout, outputs_data):
         crtcs_to_disable = []
         outputs_to_update = []
 
@@ -130,20 +162,10 @@ class LayoutManager(object):
             placement = layout.get_placement_for_output(output)
             
             if placement:
-                # output_info.num_preferred means modes[0:num]
-                # preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
-                # mode = preferred_modes[0].id
-
-                mode = screen_modes[output_info.modes[0]]
-
                 outputs_to_update.append({
                     "output": output,
                     "output_name": output_info.name.raw.decode(),
-                    "mode": {
-                        "id": mode.id,
-                        "width": mode.width,
-                        "height": mode.height
-                    },
+                    "mode": od["mode"],
                     "dimensions": {
                         "width": output_info.mm_width,
                         "height": output_info.mm_height,
@@ -211,7 +233,7 @@ class LayoutManager(object):
             layout = self.find_layout(outputs_data)
 
             if layout:
-                crtcs_to_disable, outputs_to_update = self.get_configs_for_layout(layout, outputs_data, screen_resources)
+                crtcs_to_disable, outputs_to_update = self.get_configs_for_layout(layout, outputs_data)
                 self.disable_crtcs(crtcs_to_disable)
                 self.apply_crtc_configs(outputs_to_update, root)
             else:
@@ -236,7 +258,7 @@ class Layout(object):
     def __init__(self):
         super().__init__()
 
-    def detect_by_edid(self, edids):
+    def fit(self, hints):
         return False
     
     def get_placement_for_output(self, output):
@@ -253,13 +275,13 @@ class ExampleLayout(Layout):
         position=[0, 960]
     )
 
-    def detect_by_edid(self, edids):
+    def fit(self, hints):
         ret = {}
-        for output, e in edids.items():
-            if e.name == "CB240HYK":
-                ret["right"] = output
-            elif e.name == "XV273K":
-                ret["main"] = output
+        for hint in hints:
+            if hint.edid_name == "CB240HYK":
+                ret["right"] = hint.output
+            elif hint.edid_name == "XV273K":
+                ret["main"] = hint.output
         
         self.detection_info = ret
 
