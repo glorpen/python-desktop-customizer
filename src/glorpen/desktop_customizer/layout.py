@@ -79,19 +79,27 @@ class LayoutManager(object):
         for crtc in crtcs:
             self.disable_crtc(crtc)
     
+    def get_rotated_sizing(self, rotation, original_size):
+        if rotation in (xcffib.randr.Rotation.Rotate_90, xcffib.randr.Rotation.Rotate_270):
+            return (original_size[1], original_size[0])
+        return tuple(original_size)
+
     def get_screen_sizes(self, outputs_data):
         """Returns max width and height in pixels and
         approximate physical width and height for whole screen"""
         max_x = max_y = 0
         dim_ratio = 0
         for output_data in outputs_data:
-            sizing = ["width", "height"]
-            
-            if output_data["placement"].rotation in (xcffib.randr.Rotation.Rotate_90, xcffib.randr.Rotation.Rotate_270):
-                sizing.reverse()
+            size = self.get_rotated_sizing(
+                output_data["placement"].rotation,
+                [
+                    output_data["mode"]["width"],
+                    output_data["mode"]["height"],
+                ]
+            )
 
-            x = output_data["placement"].position[0] + output_data["mode"][sizing[0]]
-            y = output_data["placement"].position[1] + output_data["mode"][sizing[1]]
+            x = output_data["placement"].position[0] + size[0]
+            y = output_data["placement"].position[1] + size[1]
 
             max_x = max(x, max_x)
             max_y = max(y, max_y)
