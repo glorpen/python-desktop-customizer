@@ -41,6 +41,9 @@ class LayoutHint(object):
         self.output_name = output_data["name"]
 
         return self
+    
+    def __repr__(self):
+        return "<%s: %r>" % (self.__class__.__qualname__, self.__dict__)
 
 class ConfiguredOutput(LayoutHint):
     placement = None
@@ -171,6 +174,7 @@ class LayoutManager(object):
         hints = []
         for od in outputs_data:
             h = LayoutHint().load_output_data(od)
+            self.logger.debug("Layout hint: %r", h)
             hints.append(h)
 
         for l in self.layouts:
@@ -281,6 +285,9 @@ class Placement(object):
         self.position = [0, 0]
 
         self.__dict__.update(kwargs)
+    
+    def __repr__(self):
+        return "<%s: %r>" % (self.__class__.__qualname__, self.__dict__)
     
 class Layout(object):
     def __init__(self):
