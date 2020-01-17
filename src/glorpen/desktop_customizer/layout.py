@@ -7,6 +7,13 @@ import time
 import xcffib.randr
 import logging
 
+from xcffib.randr import Rotation
+
+def get_rotated_sizing(rotation, original_size):
+    if rotation in (Rotation.Rotate_90, Rotation.Rotate_270):
+        return (original_size[1], original_size[0])
+    return tuple(original_size)
+
 class EdidReader(object):
     def __init__(self):
         super().__init__()
@@ -25,6 +32,26 @@ class LayoutHint(object):
     output_name = None
     output = None
 
+    def load_output_data(self, output_data):
+        self.edid_name = output_data["edid"]["name"]
+        self.edid_serial = output_data["edid"]["serial"]
+        self.width = output_data["mode"]["width"]
+        self.height = output_data["mode"]["height"]
+        self.output = output_data["output"]
+        self.output_name = output_data["name"]
+
+        return self
+
+class ConfiguredOutput(LayoutHint):
+    placement = None
+
+    def load_output_data(self, configured_output_data):
+        super().load_output_data(configured_output_data)
+
+        self.placement = configured_output_data["placement"]
+        self.width, self.height = get_rotated_sizing(self.placement.rotation, [self.width, self.height])
+
+        return self
 
 class LayoutManager(object):
     def _get_atom_id(self, name):
@@ -70,7 +97,7 @@ class LayoutManager(object):
             0,
             0,
             0,
-            xcffib.randr.Rotation.Rotate_0,
+            Rotation.Rotate_0,
             0,
             []
         ).reply()
@@ -79,18 +106,13 @@ class LayoutManager(object):
         for crtc in crtcs:
             self.disable_crtc(crtc)
     
-    def get_rotated_sizing(self, rotation, original_size):
-        if rotation in (xcffib.randr.Rotation.Rotate_90, xcffib.randr.Rotation.Rotate_270):
-            return (original_size[1], original_size[0])
-        return tuple(original_size)
-
     def get_screen_sizes(self, outputs_data):
         """Returns max width and height in pixels and
         approximate physical width and height for whole screen"""
         max_x = max_y = 0
         dim_ratio = 0
         for output_data in outputs_data:
-            size = self.get_rotated_sizing(
+            size = get_rotated_sizing(
                 output_data["placement"].rotation,
                 [
                     output_data["mode"]["width"],
@@ -106,7 +128,7 @@ class LayoutManager(object):
 
             if output_data["placement"].primary:
                 # it probably doesn't matter so just use "DPI" from primary monitor
-                dim_ratio = output_data["info"].mm_height / output_data["mode"]["height"]
+                dim_ratio = output_data["info"]["mm_height"] / output_data["mode"]["height"]
         
         return max_x, max_y, int(max_x * dim_ratio), int(max_y * dim_ratio)
 
@@ -127,8 +149,14 @@ class LayoutManager(object):
                 mode = screen_modes[output_info.modes[0]]
 
                 outputs_data.append({
-                    "edid": e,
-                    "info": output_info,
+                    "edid": {
+                        "name": e.name,
+                        "serial": e.serial,
+                    },
+                    "info": {
+                        "crtc": output_info.crtc if output_info.crtc > 0 else None, # 0 is NULL
+                        "mm_height": output_info.mm_height
+                    },
                     "output": output,
                     "name": output_info.name.raw.decode(),
                     "mode": {
@@ -139,27 +167,16 @@ class LayoutManager(object):
                 })
         return outputs_data
     
-    def get_layout_hints(self, outputs_data):
+    def find_layout(self, outputs_data):
         hints = []
         for od in outputs_data:
-            h = LayoutHint()
-            h.edid_name = od["edid"].name
-            h.edid_serial = od["edid"].serial
-            h.width = od["mode"]["width"]
-            h.height = od["mode"]["height"]
-            h.output = od["output"]
-            h.output_name = od["name"]
-
+            h = LayoutHint().load_output_data(od)
             hints.append(h)
-        return hints
-    
-    def find_layout(self, outputs_data):
-        hints = self.get_layout_hints(outputs_data)
 
         for l in self.layouts:
             if l.fit(hints):
                 return l
-
+    
     def get_configs_for_layout(self, layout, outputs_data):
         crtcs_to_disable = []
         outputs_to_update = []
@@ -178,8 +195,8 @@ class LayoutManager(object):
                 outputs_to_update.append(info)
             else:
                 # mark for disabling only currently used crtc
-                if output_info.crtc > 0: # 0 is NULL
-                    crtcs_to_disable.append(output_info.crtc)
+                if output_info["crtc"] is not None:
+                    crtcs_to_disable.append(output_info["crtc"])
         
         return [
             crtcs_to_disable,
@@ -189,10 +206,9 @@ class LayoutManager(object):
     def apply_crtc_configs(self, outputs_to_update, root):
         self.logger.debug("Updating crtcs")
         for output_data in outputs_to_update:
-            output_info = output_data["info"]
             placement = output_data["placement"]
 
-            crtc = output_info.crtc if output_info.crtc > 0 else None
+            crtc = output_data["info"]["crtc"]
             if crtc is None:
                 crtc = self.get_crt_for_output(output_data["output"])
 
@@ -225,6 +241,8 @@ class LayoutManager(object):
 
 
     def apply(self):
+        configured_outputs = []
+
         root = self.conn.get_setup().roots[0].root
 
         # grab server when changing stuff to accumulate events
@@ -240,6 +258,10 @@ class LayoutManager(object):
                 crtcs_to_disable, outputs_to_update = self.get_configs_for_layout(layout, outputs_data)
                 self.disable_crtcs(crtcs_to_disable)
                 self.apply_crtc_configs(outputs_to_update, root)
+
+                for od in outputs_to_update:
+                    configured_outputs.append(ConfiguredOutput().load_output_data(od))
+
             else:
                 self.logger.warning("No layout found")
         finally:
@@ -247,10 +269,12 @@ class LayoutManager(object):
             self.conn.core.UngrabServer()
 
             self.conn.disconnect()
+        
+        return configured_outputs
 
 class Placement(object):
     primary = False
-    rotation = xcffib.randr.Rotation.Rotate_0
+    rotation = Rotation.Rotate_0
     
     def __init__(self, **kwargs):
         super().__init__()
@@ -267,43 +291,3 @@ class Layout(object):
     
     def get_placement_for_output(self, output):
         raise NotImplementedError()
-
-class ExampleLayout(Layout):
-
-    mon_right = Placement(
-        rotation=xcffib.randr.Rotation.Rotate_90,
-        position=[3840, 0]
-    )
-    mon_main = Placement(
-        primary=True,
-        position=[0, 960]
-    )
-
-    def fit(self, hints):
-        ret = {}
-        for hint in hints:
-            if hint.edid_name == "CB240HYK":
-                ret["right"] = hint.output
-            elif hint.edid_name == "XV273K":
-                ret["main"] = hint.output
-        
-        self.detection_info = ret
-
-        return len(ret) == 2
-
-
-    def get_placement_for_output(self, output):
-        if self.detection_info["main"] == output:
-            return self.mon_main
-        elif self.detection_info["right"] == output:
-            return self.mon_right
-
-
-logging.basicConfig(level=logging.DEBUG)
-
-sl = ExampleLayout()
-
-l = LayoutManager()
-l.add_layout(sl)
-l.connect()
-l.apply()

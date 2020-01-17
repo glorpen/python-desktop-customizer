@@ -2,7 +2,6 @@
 
 import xcffib
 import xcffib.xproto
-import xcffib.xinerama as xinerama
 import os
 import struct
 import PIL
@@ -98,19 +97,12 @@ class PictureWriter(object):
 
     def connect(self, display=None):
         self.conn = xcffib.connect(display=display or os.environ.get("DISPLAY"))
-        self.ext_x = self.conn(xinerama.key)
 
         # don't remove pixmap after disconnecting
         self.conn.core.SetCloseDownMode(xcffib.xproto.CloseDown.RetainPermanent)
 
         self._atom_xrootmap = self._get_atom_id("_XROOTPMAP_ID")
         self._atom_esetroot = self._get_atom_id("ESETROOT_PMAP_ID")
-    
-    def get_monitors(self):
-        ret = []
-        for m in self.ext_x.QueryScreens().reply().screen_info:
-            ret.append(Monitor(m.x_org, m.y_org, m.width, m.height))
-        return ret
     
     def _get_atom_id(self, name):
         return self.conn.core.InternAtom(False, len(name), name).reply().atom
@@ -249,21 +241,3 @@ class ImageFinder(object):
         if images_count < count:
             return random.choices(images, k=count)
         return random.sample(images, count)
-        
-def asd():
-    f = ImageFinder("/home/glorpen/wallpapers/")
-
-    p = PictureWriter()
-    p.connect()
-    mons = p.get_monitors()
-    images = f.get_unique_random(len(mons))
-
-    for m, img in itertools.zip_longest(mons, images):
-        img.load()
-        p.set_picture(img, m)
-
-    p.write()
-    p.disconnect()
-
-logging.basicConfig(level=logging.DEBUG)
-asd()
