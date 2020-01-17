@@ -79,26 +79,26 @@ class LayoutManager(object):
         for crtc in crtcs:
             self.disable_crtc(crtc)
     
-    def get_screen_sizes(self, crtc_infos):
+    def get_screen_sizes(self, outputs_data):
         """Returns max width and height in pixels and
         approximate physical width and height for whole screen"""
         max_x = max_y = 0
         dim_ratio = 0
-        for info in crtc_infos:
+        for output_data in outputs_data:
             sizing = ["width", "height"]
             
-            if info["rotation"] in (xcffib.randr.Rotation.Rotate_90, xcffib.randr.Rotation.Rotate_270):
+            if output_data["placement"].rotation in (xcffib.randr.Rotation.Rotate_90, xcffib.randr.Rotation.Rotate_270):
                 sizing.reverse()
 
-            x = info["pos"][0] + info["mode"][sizing[0]]
-            y = info["pos"][1] + info["mode"][sizing[1]]
+            x = output_data["placement"].position[0] + output_data["mode"][sizing[0]]
+            y = output_data["placement"].position[1] + output_data["mode"][sizing[1]]
 
             max_x = max(x, max_x)
             max_y = max(y, max_y)
 
-            if info["primary"]:
+            if output_data["placement"].primary:
                 # it probably doesn't matter so just use "DPI" from primary monitor
-                dim_ratio = info["dimensions"]["height"] / info["mode"]["height"]
+                dim_ratio = output_data["info"].mm_height / output_data["mode"]["height"]
         
         return max_x, max_y, int(max_x * dim_ratio), int(max_y * dim_ratio)
 
@@ -122,6 +122,7 @@ class LayoutManager(object):
                     "edid": e,
                     "info": output_info,
                     "output": output,
+                    "name": output_info.name.raw.decode(),
                     "mode": {
                         "id": mode.id,
                         "width": mode.width,
@@ -139,7 +140,7 @@ class LayoutManager(object):
             h.width = od["mode"]["width"]
             h.height = od["mode"]["height"]
             h.output = od["output"]
-            h.output_name = od["info"].name.raw.decode()
+            h.output_name = od["name"]
 
             hints.append(h)
         return hints
@@ -162,19 +163,11 @@ class LayoutManager(object):
             placement = layout.get_placement_for_output(output)
             
             if placement:
-                outputs_to_update.append({
-                    "output": output,
-                    "output_name": output_info.name.raw.decode(),
-                    "mode": od["mode"],
-                    "dimensions": {
-                        "width": output_info.mm_width,
-                        "height": output_info.mm_height,
-                    },
-                    "pos": placement.position,
-                    "rotation": placement.rotation,
-                    "crtc": output_info.crtc if output_info.crtc > 0 else None,
-                    "primary": placement.primary
-                })
+                info = {
+                    "placement": placement
+                }
+                info.update(od)
+                outputs_to_update.append(info)
             else:
                 # mark for disabling only currently used crtc
                 if output_info.crtc > 0: # 0 is NULL
@@ -187,31 +180,34 @@ class LayoutManager(object):
 
     def apply_crtc_configs(self, outputs_to_update, root):
         self.logger.debug("Updating crtcs")
-        for info in outputs_to_update:
-            crtc = info["crtc"]
+        for output_data in outputs_to_update:
+            output_info = output_data["info"]
+            placement = output_data["placement"]
+
+            crtc = output_info.crtc if output_info.crtc > 0 else None
             if crtc is None:
-                crtc = self.get_crt_for_output(info["output"])
+                crtc = self.get_crt_for_output(output_data["output"])
 
                 if crtc is None:
-                    raise Exception("No crtc found for output %s" % info["output_name"])
+                    raise Exception("No crtc found for output %s" % output_data["name"])
             
-            crtc_outputs = [info["output"]]
+            crtc_outputs = [output_data["output"]]
 
             self.ext_r.SetCrtcConfig(
                 crtc,
                 0,
                 0,
-                info["pos"][0],
-                info["pos"][1],
-                info["mode"]["id"],
-                info["rotation"],
+                placement.position[0],
+                placement.position[1],
+                output_data["mode"]["id"],
+                placement.rotation,
                 len(crtc_outputs),
                 crtc_outputs
             ).reply()
 
-            if info["primary"]:
-                self.logger.debug("Setting primary output to %s", info["output_name"])
-                self.ext_r.SetOutputPrimary(root, info["output"])
+            if placement.primary:
+                self.logger.debug("Setting primary output to %s", output_data["name"])
+                self.ext_r.SetOutputPrimary(root, output_data["output"])
 
         max_x, max_y, dim_x, dim_y = self.get_screen_sizes(outputs_to_update)
         self.logger.debug("Setting screen size to %dx%d (%dmm x %dmm)", max_x, max_y, dim_x, dim_y)
