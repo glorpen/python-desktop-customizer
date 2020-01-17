@@ -170,17 +170,6 @@ class LayoutManager(object):
                 })
         return outputs_data
     
-    def find_layout(self, outputs_data):
-        hints = []
-        for od in outputs_data:
-            h = LayoutHint().load_output_data(od)
-            self.logger.debug("Layout hint: %r", h)
-            hints.append(h)
-
-        for l in self.layouts:
-            if l.fit(hints):
-                return l
-    
     def get_configs_for_layout(self, layout, outputs_data):
         crtcs_to_disable = []
         outputs_to_update = []
@@ -243,8 +232,15 @@ class LayoutManager(object):
 
         self.conn.flush()
 
+    def get_hints_from_outputs_data(self, outputs_data):
+        hints = []
+        for od in outputs_data:
+            h = LayoutHint().load_output_data(od)
+            # self.logger.debug("Layout hint: %r", h)
+            hints.append(h)
+        return hints
 
-    def apply(self):
+    def apply(self, hints):
         configured_outputs = []
 
         root = self.conn.get_setup().roots[0].root
@@ -256,7 +252,13 @@ class LayoutManager(object):
         try:
             screen_resources = self.ext_r.GetScreenResources(root).reply()
             outputs_data = self.gather_output_data(screen_resources)
-            layout = self.find_layout(outputs_data)
+            layout_hints = self.get_hints_from_outputs_data(outputs_data)
+
+            layout = None
+            for l in self.layouts:
+                if l.fit(hints, layout_hints):
+                    layout = l
+                    break
 
             if layout:
                 crtcs_to_disable, outputs_to_update = self.get_configs_for_layout(layout, outputs_data)
@@ -293,7 +295,7 @@ class Layout(object):
     def __init__(self):
         super().__init__()
 
-    def fit(self, hints):
+    def fit(self, detection_hints, layout_hints):
         return False
     
     def get_placement_for_output(self, output):
