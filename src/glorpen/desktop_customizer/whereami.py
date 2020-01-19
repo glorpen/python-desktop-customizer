@@ -1,70 +1,70 @@
 import platform
 import socket
+import asyncio
+import logging
 
-NL80211_CMD_GET_INTERFACE = 5
-
-NL80211_ATTR_IFNAME = 4
-NL80211_ATTR_MAC = 6
-NL80211_ATTR_SSID = 52
-
-NL80211_ATTR_MAX = NL80211_ATTR_SSID
-
-
-import netlink
-import netlink.core
-import netlink.genl
-import netlink.genl.capi
-
-class WifiFinder(object):
-
-    def nl_message_handler(self, msg, ctx):
-        info = {}
-        _e, attr = netlink.genl.capi.py_genlmsg_parse(netlink.capi.nlmsg_hdr(msg), 0, NL80211_ATTR_MAX, None)
-        if NL80211_ATTR_IFNAME in attr:
-            info["ifname"] = netlink.capi.nla_data(attr[NL80211_ATTR_IFNAME])[:-1].decode()
-            if NL80211_ATTR_SSID in attr:
-                info["ssid"] = netlink.capi.nla_data(attr[NL80211_ATTR_SSID]).decode()
-            if NL80211_ATTR_MAC in attr:
-                info["mac"] = netlink.capi.nla_data(attr[NL80211_ATTR_MAC]).hex()
-        
-        if info:
-            ctx.append(info)
-
-        return netlink.capi.NL_OK
-
-    def find(self):
-        # sk = netlink.capi.nl_socket_alloc()
-        cb = netlink.capi.nl_cb_alloc(netlink.capi.NL_CB_DEFAULT)
-        # netlink.capi.nl_close()
-        sk = netlink.capi.nl_socket_alloc_cb(cb)
-        netlink.genl.capi.genl_connect(sk)
-        
-        family = netlink.genl.capi.genl_ctrl_resolve(sk, "nl80211")
-        msg = netlink.capi.nlmsg_alloc()
-        netlink.genl.capi.genlmsg_put(msg, 0, 0, family, 0, netlink.core.NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0)
-
-        wifi_interfaces = []
-
-        netlink.core.capi.py_nl_cb_set(cb, netlink.capi.NL_CB_VALID, netlink.capi.NL_CB_CUSTOM, self.nl_message_handler, wifi_interfaces)
-        netlink.capi.nl_send_auto_complete(sk, msg)
-
-        netlink.capi.nl_recvmsgs(sk, cb)
-
-        netlink.capi.nlmsg_free(msg)
-        netlink.capi.nl_socket_free(sk)
-
-        return wifi_interfaces
+from glorpen.desktop_customizer.wifi import WifiFinder
 
 class DetectionInfo(object):
     def __init__(self):
         super().__init__()
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.data = {}
+        self.listeners = {}
+
         self._wifi = WifiFinder()
     
+    def start(self):
+        self._wifi.connect()
+    
+    def stop(self):
+        self._wifi.disconnect()
+    
+    async def watch(self):
+        await asyncio.gather(
+            self.watch_wifi(),
+            self.update_key("hostname", self.hostname())
+        )
+    
+    async def update_key(self, k, v):
+        self.data[k] = v
+
+        self.logger.debug("Updated key %r", k)
+
+        tasks = []
+        for l in self.listeners.get(k, []):
+            tasks.append(l(self.data))
+        
+        await asyncio.gather(*tasks)
+
+    async def watch_wifi(self):
+        last_info = {}
+        async for info in self._wifi.poll():
+            if info != last_info:
+                last_info = info
+                await self.update_key("wifi", info)
+    
+    async def watch_monitors(self):
+        pass
+    
+    async def watch_layout(self):
+        pass
+
     def hostname(self):
         return {
             "platform": platform.node(),
             "sock": socket.gethostname()
         }
     
-    def wifi(self):
-        return self._wifi.find()
+    def add_listener(self, keys, cb):
+        for k in keys:
+            self.listeners[k].append(cb)
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    d = DetectionInfo()
+    d.start()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(d.watch())
+    # eventy jako loop.call_soon ?
