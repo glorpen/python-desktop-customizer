@@ -16,11 +16,7 @@ NL80211_ATTR_MAX = NL80211_ATTR_SSID
 class DumpInterfacesMessage(netlink.core.Message):
     def __init__(self, family):
         super().__init__()
-        self.family = family
-        self.reset()
-    
-    def reset(self):
-        netlink.genl.capi.genlmsg_put(self._msg, netlink.core.NL_AUTO_PORT, netlink.core.NL_AUTO_SEQ, self.family, 0, netlink.core.NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0)
+        netlink.genl.capi.genlmsg_put(self._msg, netlink.core.NL_AUTO_PORT, netlink.core.NL_AUTO_SEQ, family, 0, netlink.core.NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0)
 
 class WifiFinder(object):
     running = False
@@ -51,16 +47,13 @@ class WifiFinder(object):
         self._sk = netlink.core.Socket()
         self._sk.connect(netlink.core.NETLINK_GENERIC)
 
-        family = netlink.genl.capi.genl_ctrl_resolve(self._sk._sock, "nl80211")
-
-        self._msg = DumpInterfacesMessage(family)
+        self._msg_family = netlink.genl.capi.genl_ctrl_resolve(self._sk._sock, "nl80211")
         
         self.running = True
     
     def query(self):
         self._infos.clear()
-        self._sk.send_auto_complete(self._msg)
-        self._msg.reset()
+        self._sk.send_auto_complete(DumpInterfacesMessage(self._msg_family))
         self._sk.recvmsgs(self._cb)
         return tuple(self._infos)
 
