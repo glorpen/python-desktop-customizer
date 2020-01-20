@@ -6,9 +6,13 @@ import logging
 from glorpen.desktop_customizer.wifi import WifiFinder
 from glorpen.desktop_customizer.layout import Detector, ScreenInfo, PhysicalInfo
 
+class HostnameInfo(object):
+    platform = None
+    sock = None
+
 class DetectionInfo(object):
     KEYS = [
-        'hostname',
+        HostnameInfo,
         ScreenInfo,
         PhysicalInfo
     ]
@@ -35,7 +39,7 @@ class DetectionInfo(object):
         await asyncio.gather(
             self.watch_wifi(),
             self.watch_xrand(),
-            self.update_key("hostname", self.hostname())
+            self.update_key(HostnameInfo, self.hostname())
         )
     
     async def update_key(self, k, v):
@@ -61,30 +65,11 @@ class DetectionInfo(object):
             await self.update_key(t, info)
     
     def hostname(self):
-        return {
-            "platform": platform.node(),
-            "sock": socket.gethostname()
-        }
+        info = HostnameInfo()
+        info.platform = platform.node()
+        info.sock = socket.gethostname()
+        return info
     
     def add_listener(self, keys, cb):
         for k in keys:
             self.listeners[k].append(cb)
-
-async def test(screens):
-    from glorpen.desktop_customizer.app import set_wallpapers
-
-    set_wallpapers(screens.values())
-
-if __name__ == "__main__":
-    from glorpen.desktop_customizer.layout import ScreenInfo
-    
-
-    logging.basicConfig(level=logging.DEBUG)
-    d = DetectionInfo()
-
-    d.add_listener([ScreenInfo], test)
-
-    d.start()
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(d.watch())
-    # eventy jako loop.call_soon ?
