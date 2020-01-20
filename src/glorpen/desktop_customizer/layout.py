@@ -283,7 +283,14 @@ class Layout(object):
 def get_atom_id(con, name):
     return con.core.InternAtom(False, len(name), name).reply().atom
 
-class PhysicalInfo(object):
+class BaseInfo(object):
+    def __repr__(self):
+        return '<{name}: {d!r}>'.format(name=self.__class__.__name__, d=self.__dict__)
+    
+    def __eq__(self, other):
+        return self.__class__ is other.__class__ and self.__dict__ == other.__dict__
+
+class PhysicalInfo(BaseInfo):
     output = None
     output_name = None
     width_mm = None
@@ -303,13 +310,9 @@ class PhysicalInfo(object):
 
         return pi
     
-    def __repr__(self):
-        return '<{name}: {d!r}>'.format(name=self.__class__.__name__, d=self.__dict__)
-    
-    def __eq__(self, other):
-        return self.__class__ is other.__class__ and self.__dict__ == other.__dict__
 
-class ScreenInfo(object):
+
+class ScreenInfo(BaseInfo):
     physical = None
     position = None
     size = None
@@ -337,12 +340,10 @@ class ScreenInfo(object):
         ret.size = [crtc_info.width, crtc_info.height]
         ret.rotation = crtc_info.rotation
         return ret
-    
-    def __repr__(self):
-        return '<{name}: {d!r}>'.format(name=self.__class__.__name__, d=self.__dict__)
 
 class Detector(object):
     running = False
+    batch_changes_seconds = 2
 
     def __init__(self):
         super().__init__()
@@ -449,7 +450,13 @@ class Detector(object):
             else:
                 for output in crtc_info.outputs:
                     self.update_infos(output, None, False)
-
+    
+    def has_pending_changes(self):
+        for i in self._pending_changes.values():
+            if i:
+                return True
+        return False
+    
     async def watch(self):
         self.connect()
 
@@ -463,6 +470,9 @@ class Detector(object):
         )
         self.conn.flush()
 
+        loop = asyncio.get_event_loop()
+        changes_timer = None
+
         while self.running:
             while True:
                 ev = self.conn.poll_for_event()
@@ -470,11 +480,16 @@ class Detector(object):
                     break
                 
                 await self.handle_event(ev)
-                
-            for i, info in [(PhysicalInfo, self._physical_info), (ScreenInfo, self._output_info)]:
-                if self._pending_changes[i]:
-                    self._pending_changes[i] = False
-                    yield (i, info)
+            
+            if changes_timer is None and self.has_pending_changes():
+                changes_timer = loop.time()
+            
+            if changes_timer is not None and changes_timer + self.batch_changes_seconds < loop.time():
+                for i, info in [(PhysicalInfo, self._physical_info), (ScreenInfo, self._output_info)]:
+                    if self._pending_changes[i]:
+                        self._pending_changes[i] = False
+                        yield (i, info)
+                changes_timer = None
             # TODO: make events run in batches, eg. max one per second?
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.7)
