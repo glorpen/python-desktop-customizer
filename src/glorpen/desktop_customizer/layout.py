@@ -46,17 +46,6 @@ class LayoutHint(object):
     def __repr__(self):
         return "<%s: %r>" % (self.__class__.__qualname__, self.__dict__)
 
-class ConfiguredOutput(LayoutHint):
-    placement = None
-
-    def load_output_data(self, configured_output_data):
-        super().load_output_data(configured_output_data)
-
-        self.placement = configured_output_data["placement"]
-        self.width, self.height = get_rotated_sizing(self.placement.rotation, [self.width, self.height])
-
-        return self
-
 class LayoutManager(object):
     def _get_atom_id(self, name):
         return self.conn.core.InternAtom(False, len(name), name).reply().atom
@@ -73,14 +62,10 @@ class LayoutManager(object):
     def connect(self):
         self.conn = xcffib.connect(os.environ.get("DISPLAY"))
         self.ext_r = self.conn(xcffib.randr.key)
-        
-        self._ATOM_EDID = self._get_atom_id("EDID")
-
-    def get_edid_for_output(self, output):
-        # 32 as in 32 * uin32 = 128 edid bytes
-        d = bytes(self.ext_r.GetOutputProperty(output, self._ATOM_EDID, xcffib.xproto.Atom.Any, 0, 32, False, False).reply().data)
-        return self.edid.parse(d)
     
+    def disconnect(self):
+        self.conn.disconnect()
+
     def get_crt_for_output(self, output, output_info = None):
         if output_info is None:
             output_info = self.ext_r.GetOutputInfo(output, 0).reply()
@@ -136,7 +121,7 @@ class LayoutManager(object):
         
         return max_x, max_y, int(max_x * dim_ratio), int(max_y * dim_ratio)
 
-    def gather_output_data(self, screen_resources):
+    def gather_output_data(self, screen_resources, hints):
         screen_modes = dict((m.id, m) for m in screen_resources.modes)
 
         outputs_data = []
@@ -145,8 +130,6 @@ class LayoutManager(object):
             
             # skip outputs without monitors
             if output_info.connection == 0:
-                e = self.get_edid_for_output(output)
-
                 # output_info.num_preferred means modes[0:num]
                 # preferred_modes = [screen_modes[i] for i in output_info.modes[0:output_info.num_preferred]]
                 # mode = preferred_modes[0].id
@@ -154,15 +137,15 @@ class LayoutManager(object):
 
                 outputs_data.append({
                     "edid": {
-                        "name": e.name,
-                        "serial": e.serial,
+                        "name": hints[output].monitor_name,
+                        "serial": hints[output].monitor_serial,
                     },
                     "info": {
                         "crtc": output_info.crtc if output_info.crtc > 0 else None, # 0 is NULL
-                        "mm_height": output_info.mm_height
+                        "mm_height": hints[output].height_mm
                     },
                     "output": output,
-                    "name": output_info.name.raw.decode(),
+                    "name": hints[output].output_name,
                     "mode": {
                         "id": mode.id,
                         "width": mode.width,
@@ -237,12 +220,11 @@ class LayoutManager(object):
         hints = []
         for od in outputs_data:
             h = LayoutHint().load_output_data(od)
-            # self.logger.debug("Layout hint: %r", h)
             hints.append(h)
         return hints
 
-    def apply(self, hints):
-        configured_outputs = []
+    async def apply(self, hints):
+        # configured_outputs = []
 
         root = self.conn.get_setup().roots[0].root
 
@@ -252,12 +234,12 @@ class LayoutManager(object):
 
         try:
             screen_resources = self.ext_r.GetScreenResources(root).reply()
-            outputs_data = self.gather_output_data(screen_resources)
+            outputs_data = self.gather_output_data(screen_resources, hints)
             layout_hints = self.get_hints_from_outputs_data(outputs_data)
 
             layout = None
             for l in self.layouts:
-                if l.fit(hints, layout_hints):
+                if l.fit(layout_hints):
                     layout = l
                     break
 
@@ -265,19 +247,15 @@ class LayoutManager(object):
                 crtcs_to_disable, outputs_to_update = self.get_configs_for_layout(layout, outputs_data)
                 self.disable_crtcs(crtcs_to_disable)
                 self.apply_crtc_configs(outputs_to_update, root)
-
-                for od in outputs_to_update:
-                    configured_outputs.append(ConfiguredOutput().load_output_data(od))
-
             else:
                 self.logger.warning("No layout found")
         finally:
+            self.conn.flush()
             self.logger.debug("Ungrabbing server")
             self.conn.core.UngrabServer()
+            self.conn.flush()
 
-            self.conn.disconnect()
-        
-        return configured_outputs
+            # self.conn.disconnect()
 
 class Placement(object):
     primary = False
@@ -296,13 +274,11 @@ class Layout(object):
     def __init__(self):
         super().__init__()
 
-    def fit(self, detection_hints, layout_hints):
+    def fit(self, layout_hints):
         return False
     
     def get_placement_for_output(self, output):
         raise NotImplementedError()
-
-import time
 
 def get_atom_id(con, name):
     return con.core.InternAtom(False, len(name), name).reply().atom
@@ -398,11 +374,6 @@ class Detector(object):
         d = bytes(self.ext_r.GetOutputProperty(output, self._ATOM_EDID, xcffib.xproto.Atom.Any, 0, 32, False, False).reply().data)
         return self.edid.parse(d)
 
-    def on_change_physical(self, infos):
-        self.logger.debug("Updating physical info to: %r", infos)
-    def on_change_screen(self, infos):
-        self.logger.debug("Updating screen info to: %r", infos)
-    
     def find_initial_state(self):
         screen_resources = self.ext_r.GetScreenResources(self.root).reply()
 
@@ -441,11 +412,16 @@ class Detector(object):
         
     async def handle_event(self, ev):
         # self.logger.debug(ev.__dict__)
+        if not isinstance(ev, xcffib.randr.NotifyEvent):
+            self.logger.debug("Got %r event", ev)
+            return
+        
         if ev.subCode == xcffib.randr.Notify.OutputChange:
+            self.logger.debug("Output was changed")
             is_connected = ev.u.oc.connection == xcffib.randr.Connection.Connected
             output = ev.u.oc.output
             crtc = ev.u.oc.crtc
-            rotation = ev.u.oc.rotation
+            # rotation = ev.u.oc.rotation
 
             if is_connected:
                 e = self.get_edid_for_output(output)
@@ -464,7 +440,7 @@ class Detector(object):
                 self.update_infos(output, False, False)
 
         if ev.subCode == xcffib.randr.Notify.CrtcChange:
-            self.logger.debug(["Crtc change", ev.u.cc.__dict__])
+            self.logger.debug("Crtc was changed")
             crtc_info = self.ext_r.GetCrtcInfo(ev.u.cc.crtc, 0).reply()
             if ev.u.cc.mode > 0:
                 for output in crtc_info.outputs:
