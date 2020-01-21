@@ -13,12 +13,15 @@ import random
 import itertools
 
 class Monitor(object):
-    def __init__(self, x, y, width, height):
+    def __init__(self, x, y, width, height, name=None):
         super().__init__()
         self.x = x
         self.y = y
         self.width = width
         self.height = height
+        self.name = name
+    def __repr__(self):
+        return '<{cls}: {d!r}>'.format(cls=self.__class__.__name__, d=self.__dict__ if self.name is None else self.name)
 
 class Picture(object):
     _req_mode = "RGBA"
@@ -144,6 +147,8 @@ class PictureWriter(object):
                 crop_box = (offset, 0, offset + block_width, monitor.height)
                 
                 data = picture_for_mon.crop(crop_box).tobytes('raw', 'BGRA')
+
+                self.logger.debug("Copying cropped image {crop[0]}x{crop[1]}x{crop[2]}x{crop[3]} to {p!r}".format(crop=crop_box, p=picture))
 
                 self.conn.core.PutImage(
                     xcffib.xproto.ImageFormat.ZPixmap,
