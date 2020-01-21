@@ -4,6 +4,9 @@ import netlink
 import netlink.core
 import netlink.genl
 import netlink.genl.capi
+import datetime
+
+from glorpen.desktop_customizer.whereami.hints.simple import WifiHint
 
 NL80211_CMD_GET_INTERFACE = 5
 
@@ -17,6 +20,7 @@ class DumpInterfacesMessage(netlink.core.Message):
     def __init__(self, family):
         super().__init__()
         netlink.genl.capi.genlmsg_put(self._msg, netlink.core.NL_AUTO_PORT, netlink.core.NL_AUTO_SEQ, family, 0, netlink.core.NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0)
+        
 
 class WifiFinder(object):
     running = False
@@ -26,14 +30,15 @@ class WifiFinder(object):
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def nl_message_handler(self, msg, ctx):
-        info = {}
+        info = None
         _e, attr = netlink.genl.capi.py_genlmsg_parse(netlink.capi.nlmsg_hdr(msg), 0, NL80211_ATTR_MAX, None)
         if NL80211_ATTR_IFNAME in attr:
-            info["ifname"] = netlink.capi.nla_get_string(attr[NL80211_ATTR_IFNAME])
+            info = WifiHint()
+            info.ifname = netlink.capi.nla_get_string(attr[NL80211_ATTR_IFNAME])
             if NL80211_ATTR_SSID in attr:
-                info["ssid"] = netlink.capi.nla_get_string(attr[NL80211_ATTR_SSID])
+                info.ssid = netlink.capi.nla_get_string(attr[NL80211_ATTR_SSID])
             if NL80211_ATTR_MAC in attr:
-                info["mac"] = netlink.capi.nla_data(attr[NL80211_ATTR_MAC]).hex()
+                info.mac = netlink.capi.nla_data(attr[NL80211_ATTR_MAC]).hex()
         
         if info:
             ctx.append(info)

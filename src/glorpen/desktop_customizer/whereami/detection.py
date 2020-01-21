@@ -6,13 +6,14 @@ import logging
 from glorpen.desktop_customizer.whereami.wifi import WifiFinder
 from glorpen.desktop_customizer.whereami.xrand import Detector
 from glorpen.desktop_customizer.whereami.hints.xrand import ScreenHint, MonitorHint
-from glorpen.desktop_customizer.whereami.hints.simple import HostnameHint
+from glorpen.desktop_customizer.whereami.hints.simple import HostnameHint, WifiHint
 
 class DetectionInfo(object):
     KEYS = [
         HostnameHint,
         ScreenHint,
-        MonitorHint
+        MonitorHint,
+        WifiHint
     ]
     
     def __init__(self):
@@ -46,8 +47,13 @@ class DetectionInfo(object):
         self.logger.debug("Updated key %r", k)
 
         tasks = []
-        for l in self.listeners.get(k, []):
-            tasks.append(l(v))
+        for cb_info in self.listeners.get(k, []):
+            try:
+                args = [self.data[cb_k] for cb_k in cb_info["keys"]]
+            except KeyError:
+                # not all required detectors are initialized
+                continue
+            tasks.append(cb_info["cb"](*args))
         
         await asyncio.gather(*tasks)
 
@@ -56,7 +62,7 @@ class DetectionInfo(object):
         async for info in self._wifi.poll():
             if info != last_info:
                 last_info = info
-                await self.update_key("wifi", info)
+                await self.update_key(WifiHint, info)
     
     async def watch_xrand(self):
         async for t, info in self._xrand.watch():
@@ -70,4 +76,4 @@ class DetectionInfo(object):
     
     def add_listener(self, keys, cb):
         for k in keys:
-            self.listeners[k].append(cb)
+            self.listeners[k].append({"cb": cb, "keys": tuple(keys)})
