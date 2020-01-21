@@ -148,7 +148,7 @@ class PictureWriter(object):
                 
                 data = picture_for_mon.crop(crop_box).tobytes('raw', 'BGRA')
 
-                self.logger.debug("Copying cropped image {crop[0]}x{crop[1]}x{crop[2]}x{crop[3]} to {p!r}".format(crop=crop_box, p=picture))
+                self.logger.debug("Copying cropped image ({crop[0]},{crop[1]}),({crop[2]},{crop[3]}) from {p!r}".format(crop=crop_box, p=picture))
 
                 self.conn.core.PutImage(
                     xcffib.xproto.ImageFormat.ZPixmap,
