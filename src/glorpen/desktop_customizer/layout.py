@@ -1,8 +1,5 @@
 import os
 import xcffib
-import xcffib.xproto
-import pyedid.edid
-import pyedid.helpers.registry
 import time
 import xcffib.randr
 import logging
