@@ -71,6 +71,17 @@ class Picture(object):
         image = image.resize((monitor.width, monitor.height), resample=PIL.Image.LANCZOS)
 
         return image
+    
+    def get_uri(self):
+        raise NotImplementedError()
+    
+    def __eq__(self, other):
+        return self.get_uri() == other.get_uri()
+    
+    def __repr__(self):
+        return "<%s: %r>" % (self.__class__.__qualname__, self.get_uri())
+    def __hash__(self):
+        return hash(self.get_uri())
 
 class FilePicture(Picture):
     _xattr_poi = "user.glorpen.wallpaper.poi"
@@ -78,6 +89,9 @@ class FilePicture(Picture):
     def __init__(self, path):
         super().__init__()
         self.path = path
+    
+    def get_uri(self):
+        return self.path
     
     def load(self):
         self.image = PIL.Image.open(self.path)
@@ -87,9 +101,6 @@ class FilePicture(Picture):
             self.poi = [int(i) for i in poi.split(b"x")]
         except OSError:
             pass
-    
-    def __repr__(self):
-        return "<%s: %r>" % (self.__class__.__qualname__, self.path)
 
 class PictureWriter(object):
 
@@ -238,11 +249,12 @@ class ImageFinder(object):
                 ret.add(FilePicture(os.path.join(root, file)))
         return tuple(ret)
 
-    def get_unique_random(self, count):
-        images = self.get_images()
+    def get_unique_random(self, count, excludes=[]):
+        images = list(filter(lambda x: x not in excludes, self.get_images()))
+
         images_count = len(images)
         if images_count == 0:
-            raise Exception("No images found in %r" % self.root_dir)
-        if images_count < count:
-            return random.choices(images, k=count)
+            raise Exception("No unused images found in %r" % self.root_dir)
+        # if images_count < count:
+        #     return random.choices(images, k=count)
         return random.sample(images, count)
