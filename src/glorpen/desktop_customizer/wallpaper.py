@@ -11,6 +11,7 @@ import xattr
 import logging
 import random
 import itertools
+import hashlib
 
 class Monitor(object):
     def __init__(self, x, y, width, height, name=None):
@@ -40,6 +41,9 @@ class Picture(object):
         raise NotImplementedError()
 
     def get_image(self, monitor):
+        if self.image is None:
+            self.load()
+
         image = self.image if self.image.mode == self._req_mode else self.image.convert(self._req_mode)
 
         # find Point of Interest to later center on
@@ -236,18 +240,71 @@ class PictureWriter(object):
     def disconnect(self):
         self.conn.disconnect()
 
+class CachedPicture(object):
+    def __init__(self, cache, picture):
+        super().__init__()
+        self.picture = picture
+        self.cache = cache
+    
+    def get_cache_key(self, monitor):
+        k = [self.get_uri(), monitor.width, monitor.height]
+        return hashlib.sha1(repr(k).encode()).hexdigest()
+
+    def get_uri(self):
+        return self.picture.get_uri()
+    
+    def load(self):
+        pass
+    
+    def get_image(self, monitor):
+        k = self.get_cache_key(monitor)
+
+        if k in self.cache:
+            img = self.cache[k]
+        else:
+            img = self.picture.get_image(monitor)
+            self.cache[k] = img
+        
+        return img
+
+class DictCache(object):
+    def __init__(self):
+        super().__init__()
+        self.data = {}
+    
+    def __contains__(self, name):
+        return name in self.data
+
+    def __getitem__(self, name):
+        return self.data[name]
+    
+    def __setitem__(self, name, value):
+        self.data[name] = value
+
 class ImageFinder(object):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, cache=None):
         super().__init__()
 
+        self.logger = logging.getLogger(self.__class__.__name__)
+
         self.root_dir = root_dir
+        self.cache = cache
+        if cache:
+            self.logger.debug("Using cache %r", cache)
+        else:
+            self.logger.debug("Not using cache")
     
-    def get_images(self):
-        ret = set()
+    def get_raw_images(self):
         for root, _dirs, files in os.walk(self.root_dir):
             for file in files:
-                ret.add(FilePicture(os.path.join(root, file)))
-        return tuple(ret)
+                yield FilePicture(os.path.join(root, file))
+    
+    def get_images(self):
+        if self.cache:
+            for i in self.get_raw_images():
+                yield CachedPicture(self.cache, i)
+        else:
+            yield from self.get_raw_images()
 
     def get_unique_random(self, count, excludes=[]):
         images = list(filter(lambda x: x not in excludes, self.get_images()))
