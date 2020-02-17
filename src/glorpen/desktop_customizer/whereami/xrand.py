@@ -26,7 +26,7 @@ def get_atom_id(con, name):
 
 class Detector(object):
     running = False
-    batch_changes_seconds = 2
+    batch_changes_seconds = 1
 
     def __init__(self):
         super().__init__()
