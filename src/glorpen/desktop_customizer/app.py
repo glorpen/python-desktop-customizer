@@ -1,63 +1,166 @@
 import logging
 import itertools
+import platform
+import asyncio
+import subprocess
 from glorpen.desktop_customizer.layout import Placement, LayoutManager, Rotation, Layout
-from glorpen.desktop_customizer.wallpaper import ImageFinder, PictureWriter, Monitor
+from glorpen.desktop_customizer.wallpaper import ImageFinder, PictureWriter, Monitor, DictCache
+from glorpen.desktop_customizer.whereami.detection import DetectionInfo
+from glorpen.desktop_customizer.whereami.hints.xrand import ScreenHint, MonitorHint
+from glorpen.desktop_customizer.whereami.hints.simple import WifiHint, HostHint
+import asyncio
 
-class ExampleLayout(Layout):
+class WallpaperManager(object):
+    def __init__(self, path):
+        super().__init__()
+        self.finder = ImageFinder(path, cache=DictCache())
+        self.cache = {}
 
-    mon_right = Placement(
-        rotation=Rotation.Rotate_90,
-        position=[3840, 0]
-    )
-    mon_main = Placement(
-        primary=True,
-        position=[0, 960]
-    )
+    async def set_wallpapers(self, screens, *args):
+        new_screens = []
+
+        p = PictureWriter()
+        p.connect()
+
+        for s in screens.values():
+            output = s.physical.output
+            if output in self.cache:
+                p.set_picture(
+                    self.cache[output],
+                    Monitor(s.x, s.y, s.width, s.height, name=s.physical.output_name)
+                )
+            else:
+                new_screens.append(s)
+
+        if new_screens:
+            new_images = self.finder.get_unique_random(len(new_screens), self.cache.values())
+
+            for co, img in itertools.zip_longest(new_screens, new_images):
+                self.cache[co.physical.output] = img
+                p.set_picture(
+                    img,
+                    Monitor(co.x, co.y, co.width, co.height, name=co.physical.output_name)
+                )
+
+        p.write()
+        p.disconnect()
+
+from glorpen.desktop_customizer.config import reader as config_reader
+import itertools
+
+class ActionCallback(object):
+    def __init__(self, condition, action, watch, events, actions):
+        super().__init__()
+        self.condition = condition
+        self.action = action
+        self.watch = watch
+        self.events = events
+        self.actions = actions
+    
+    async def __call__(self, *args):
+        kwargs = dict(i for i in itertools.zip_longest(self.events, args))
+        
+        if not self.condition(**kwargs):
+            print("skipping", kwargs)
+            return
+        
+        if self.watch:
+            print(self.watch)
+        # TODO: check watch values for changes since last time
+
+        for a in self.action:
+            for k,v in a.items():
+                if k in self.actions:
+                    await self.actions[k].do(**kwargs, **v)
+                else:
+                    print("Unknown action %r" % k)
+
+class WallpaperAction(object):
+    def __init__(self, wm):
+        super().__init__()
+
+        self.wm = wm
+        
+    async def do(self, screen, safe, **kwargs):
+        await self.wm.set_wallpapers(screen)
+
+class DynamicLayout(Layout):
+    def __init__(self):
+        super().__init__()
+
+        self.placements = {}
 
     def fit(self, hints):
-        ret = {}
-        for hint in hints:
-            if hint.edid_name == "CB240HYK":
-                ret["right"] = hint.output
-            elif hint.edid_name == "XV273K":
-                ret["main"] = hint.output
-        
-        self.detection_info = ret
-
-        return len(ret) == 2
-
+        self.hints = hints
+        return True
+    
     def get_placement_for_output(self, output):
-        if self.detection_info["main"] == output:
-            return self.mon_main
-        elif self.detection_info["right"] == output:
-            return self.mon_right
+        if output in self.placements:
+            return self.placements[output]
 
-        
-def set_wallpapers(configured_outputs):
-    f = ImageFinder("/home/glorpen/wallpapers/")
+class LayoutAction(object):
+    def __init__(self, lm, dl):
+        super().__init__()
 
-    p = PictureWriter()
-    p.connect()
-    images = f.get_unique_random(len(configured_outputs))
+        self.lm = lm
+        self.dl = dl
+    
+    async def do(self, monitor, monitors, **kwargs):
+        placements = {}
+        for m in monitor.values():
+            for cm in monitors:
+                if cm["name"] is not None and cm["name"] != m.monitor_name:
+                    continue
+                if cm["serial"] is not None and cm["serial"] != m.monitor_serial:
+                    continue
+                
+                placements[m.output] = Placement(
+                    rotation=cm["rotation"],
+                    primary=cm["primary"],
+                    position=[int(cm["position"]["x"]), int(cm["position"]["y"])]
+                )
+                break
 
-    for co, img in itertools.zip_longest(configured_outputs, images):
-        img.load()
-        p.set_picture(
-            img,
-            Monitor(co.placement.position[0], co.placement.position[1], co.width, co.height)
-        )
+        self.dl.placements = placements
+        await self.lm.apply(monitor)
 
-    p.write()
-    p.disconnect()
+class CommandAction(object):
+    async def do(self, args, **kwargs):
+        await asyncio.create_subprocess_exec(*args)
+
+def from_config(cfg):
+    wm = WallpaperManager(cfg["wallpaper"]["directory"])
+    lm = LayoutManager()
+    dl = DynamicLayout()
+    
+    dinfo = DetectionInfo()
+    events = {
+        "screen": ScreenHint,
+        "wifi": WifiHint,
+        "host": HostHint,
+        "monitor": MonitorHint
+    }
+
+    actions = {
+        "wallpaper": WallpaperAction(wm),
+        "layout": LayoutAction(lm, dl),
+        "command": CommandAction()
+    }
+    lm.add_layout(dl)
+
+    for action in cfg["actions"]:
+        mapped_events = tuple(map(events.get, action["events"]))
+        dinfo.add_listener(mapped_events, ActionCallback(action["if"], action["do"], action["watch"], action["events"], actions))
+    
+    dinfo.start()
+    lm.connect()
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(dinfo.watch())
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
 
-    sl = ExampleLayout()
-
-    l = LayoutManager()
-    l.add_layout(sl)
-    l.connect()
-    
-    configured_outputs = l.apply()
-    set_wallpapers(configured_outputs)
+    config = config_reader("/mnt/sandbox/workspace/glorpen/desktop-customizer/config.yaml")
+    from_config(config)
+    # print(config)
