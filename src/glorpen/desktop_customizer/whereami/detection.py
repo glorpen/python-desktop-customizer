@@ -6,11 +6,11 @@ import logging
 from glorpen.desktop_customizer.whereami.wifi import WifiFinder
 from glorpen.desktop_customizer.whereami.xrand import Detector
 from glorpen.desktop_customizer.whereami.hints.xrand import ScreenHint, MonitorHint
-from glorpen.desktop_customizer.whereami.hints.simple import HostnameHint, WifiHint
+from glorpen.desktop_customizer.whereami.hints.simple import HostHint, WifiHint
 
 class DetectionInfo(object):
     KEYS = [
-        HostnameHint,
+        HostHint,
         ScreenHint,
         MonitorHint,
         WifiHint
@@ -38,7 +38,7 @@ class DetectionInfo(object):
         await asyncio.gather(
             self.watch_wifi(),
             self.watch_xrand(),
-            self.update_key(HostnameHint, self.hostname())
+            self.update_key(HostHint, self.hostname())
         )
     
     async def update_key(self, k, v):
@@ -69,7 +69,7 @@ class DetectionInfo(object):
             await self.update_key(t, info)
     
     def hostname(self):
-        info = HostnameHint()
+        info = HostHint()
         info.platform = platform.node()
         info.sock = socket.gethostname()
         return info

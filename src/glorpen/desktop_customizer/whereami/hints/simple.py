@@ -1,6 +1,6 @@
 from glorpen.desktop_customizer.whereami.hints import Hint
 
-class HostnameHint(Hint):
+class HostHint(Hint):
     platform = None
     sock = None
 
