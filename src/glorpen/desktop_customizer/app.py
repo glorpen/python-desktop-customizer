@@ -8,6 +8,7 @@ from glorpen.desktop_customizer.wallpaper import ImageFinder, PictureWriter, Mon
 from glorpen.desktop_customizer.whereami.detection import DetectionInfo
 from glorpen.desktop_customizer.whereami.hints.xrand import ScreenHint, MonitorHint
 from glorpen.desktop_customizer.whereami.hints.simple import WifiHint, HostHint
+from glorpen.desktop_customizer.automation.dimmer import Dimmer
 import asyncio
 
 class WallpaperManager(object):
@@ -153,10 +154,14 @@ def from_config(cfg):
         dinfo.add_listener(mapped_events, ActionCallback(action["if"], action["do"], action["watch"], action["events"], actions))
     
     dinfo.start()
+
+    dimmer = Dimmer()
+
+    dimmer.connect()
     lm.connect()
 
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(dinfo.watch())
+    loop.run_until_complete(asyncio.gather(dinfo.watch(), dimmer.loop()))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
