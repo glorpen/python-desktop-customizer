@@ -68,6 +68,7 @@ _schema_do = [
         "layout": fs.Dict({
             "monitors": fs.List(fs.Dict({
                 "name": fb.Optional(fs.String()),
+                "output": fb.Optional(fs.String()),
                 "serial": fb.Optional(fs.String()),
                 "primary": fb.Optional(fs.Bool(), default=False),
                 "position": fb.Optional(fs.Dict({

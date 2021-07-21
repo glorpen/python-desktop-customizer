@@ -110,6 +110,8 @@ class LayoutAction(object):
         placements = {}
         for m in monitor.values():
             for cm in monitors:
+                if cm["output"] is not None and cm["output"] != m.output_name:
+                    continue
                 if cm["name"] is not None and cm["name"] != m.monitor_name:
                     continue
                 if cm["serial"] is not None and cm["serial"] != m.monitor_serial:
