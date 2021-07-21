@@ -1,5 +1,6 @@
 from glorpen.desktop_customizer.whereami.hints import Hint
 
+
 class MonitorHint(Hint):
     output = None
     output_name = None
@@ -19,7 +20,6 @@ class MonitorHint(Hint):
         pi.height_mm = output_info.mm_height
 
         return pi
-    
 
 
 class ScreenHint(Hint):
@@ -31,13 +31,15 @@ class ScreenHint(Hint):
     @property
     def x(self):
         return self.position[0] if self.position else None
+
     @property
     def y(self):
         return self.position[1] if self.position else None
-    
+
     @property
     def width(self):
         return self.size[0] if self.size else None
+
     @property
     def height(self):
         return self.size[1] if self.size else None

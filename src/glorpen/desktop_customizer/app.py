@@ -1,15 +1,13 @@
-import logging
-import itertools
-import platform
 import asyncio
-import subprocess
-from glorpen.desktop_customizer.layout import Placement, LayoutManager, Rotation, Layout
+import logging
+
+from glorpen.desktop_customizer.automation.dimmer import Dimmer
+from glorpen.desktop_customizer.layout import Placement, LayoutManager, Layout
 from glorpen.desktop_customizer.wallpaper import ImageFinder, PictureWriter, Monitor, DictCache
 from glorpen.desktop_customizer.whereami.detection import DetectionInfo
-from glorpen.desktop_customizer.whereami.hints.xrand import ScreenHint, MonitorHint
 from glorpen.desktop_customizer.whereami.hints.simple import WifiHint, HostHint
-from glorpen.desktop_customizer.automation.dimmer import Dimmer
-import asyncio
+from glorpen.desktop_customizer.whereami.hints.xrand import ScreenHint, MonitorHint
+
 
 class WallpaperManager(object):
     def __init__(self, path):
@@ -46,8 +44,10 @@ class WallpaperManager(object):
         p.write()
         p.disconnect()
 
+
 from glorpen.desktop_customizer.config import reader as config_reader
 import itertools
+
 
 class ActionCallback(object):
     def __init__(self, condition, action, watch, events, actions):
@@ -57,33 +57,35 @@ class ActionCallback(object):
         self.watch = watch
         self.events = events
         self.actions = actions
-    
+
     async def __call__(self, *args):
         kwargs = dict(i for i in itertools.zip_longest(self.events, args))
-        
+
         if not self.condition(**kwargs):
             print("skipping", kwargs)
             return
-        
+
         if self.watch:
             print(self.watch)
         # TODO: check watch values for changes since last time
 
         for a in self.action:
-            for k,v in a.items():
+            for k, v in a.items():
                 if k in self.actions:
                     await self.actions[k].do(**kwargs, **v)
                 else:
                     print("Unknown action %r" % k)
+
 
 class WallpaperAction(object):
     def __init__(self, wm):
         super().__init__()
 
         self.wm = wm
-        
+
     async def do(self, screen, safe, **kwargs):
         await self.wm.set_wallpapers(screen)
+
 
 class DynamicLayout(Layout):
     def __init__(self):
@@ -94,10 +96,11 @@ class DynamicLayout(Layout):
     def fit(self, hints):
         self.hints = hints
         return True
-    
+
     def get_placement_for_output(self, output):
         if output in self.placements:
             return self.placements[output]
+
 
 class LayoutAction(object):
     def __init__(self, lm, dl):
@@ -105,7 +108,7 @@ class LayoutAction(object):
 
         self.lm = lm
         self.dl = dl
-    
+
     async def do(self, monitor, monitors, **kwargs):
         placements = {}
         for m in monitor.values():
@@ -116,7 +119,7 @@ class LayoutAction(object):
                     continue
                 if cm["serial"] is not None and cm["serial"] != m.monitor_serial:
                     continue
-                
+
                 placements[m.output] = Placement(
                     rotation=cm["rotation"],
                     primary=cm["primary"],
@@ -127,15 +130,17 @@ class LayoutAction(object):
         self.dl.placements = placements
         await self.lm.apply(monitor)
 
+
 class CommandAction(object):
     async def do(self, args, **kwargs):
         await asyncio.create_subprocess_exec(*args)
+
 
 def from_config(cfg):
     wm = WallpaperManager(cfg["wallpaper"]["directory"])
     lm = LayoutManager()
     dl = DynamicLayout()
-    
+
     dinfo = DetectionInfo()
     events = {
         "screen": ScreenHint,
@@ -153,8 +158,10 @@ def from_config(cfg):
 
     for action in cfg["actions"]:
         mapped_events = tuple(map(events.get, action["events"]))
-        dinfo.add_listener(mapped_events, ActionCallback(action["if"], action["do"], action["watch"], action["events"], actions))
-    
+        dinfo.add_listener(
+            mapped_events,
+            ActionCallback(action["if"], action["do"], action["watch"], action["events"], actions))
+
     dinfo.start()
 
     dimmer = Dimmer()
@@ -164,6 +171,7 @@ def from_config(cfg):
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(asyncio.gather(dinfo.watch(), dimmer.loop()))
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
