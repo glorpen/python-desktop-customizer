@@ -44,6 +44,7 @@ class ExpressionField(fb.Field):
     #     return value is None or isinstance(value, (str,))
     # def get(self, raw_value):
     #     return self.parse(raw_value)
+ExpressionField.default_value = ExpressionField._true
 
 class JinjaField(fb.Field):
     def __init__(self, env):
@@ -69,10 +70,10 @@ _schema_do = [
                 "name": fb.Optional(fs.String()),
                 "serial": fb.Optional(fs.String()),
                 "primary": fb.Optional(fs.Bool(), default=False),
-                "position": fs.Dict({
+                "position": fb.Optional(fs.Dict({
                     "x": fb.Optional(fs.Number()),
                     "y": fb.Optional(fs.Number())
-                }),
+                })),
                 "rotation": fb.Optional(fs.Choice({
                     0: Rotation.Rotate_0,
                     90: Rotation.Rotate_90,
@@ -81,11 +82,11 @@ _schema_do = [
                 }), default=Rotation.Rotate_0)
             })),
             "unknown_monitors": fs.Any()
-        })
+        }).help(description="Manage monitor layout")
     }, check_keys=True),
     fs.Dict({
         "wallpaper": fs.Dict({
-            "safe": fb.Optional(fs.Bool())
+            "safe": fb.Optional(fs.Bool(), default=True)
         })
     }, check_keys=True),
     fs.Dict({
@@ -106,10 +107,10 @@ _schema = fs.Dict({
     "actions": fs.List(fs.Dict({
         "events": fs.List(fs.Choice(
             ["host", "screen", "monitor", "wifi"]
-        ).help(description="Event name")).help(description="Event name to trigger on"),
-        "if": ExpressionField(env).help(description="Expression to evaluate", value="1 + 1 == 2"),
-        "do": fs.List(fs.Variant(_schema_do)), #, try_resolving=True
-        "watch": fb.Optional(fs.List(ExpressionField(env)), default=[])
+        ).help(description="Event name", value='host')).help(description="Event names to trigger on"),
+        "if": fb.Optional(ExpressionField(env)).help(description="Expression to evaluate", value="1 + 1 == 2"),
+        "do": fs.List(fs.Variant(_schema_do)).help(description="Will execute things in order"), #, try_resolving=True
+        "watch": fb.Optional(fs.List(ExpressionField(env).help(description="Path expression to watch", value="screen.primary.width")))
     })).help(description="Trigger actions"),
     "wallpaper": fs.Dict({
         "directory": fs.PathObj().help(description="Path where files will be searched for", value="/some/path"),
@@ -118,7 +119,8 @@ _schema = fs.Dict({
     }).help(description="Configure wallpapers source")
 })
 
-from glorpen.config import Config, Translator
+from glorpen.config.config import Config
+from glorpen.config.translators.base import Translator
 from glorpen.config.translators.yaml import YamlReader, YamlRenderer
 
 def reader(path):

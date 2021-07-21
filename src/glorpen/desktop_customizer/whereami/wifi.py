@@ -1,9 +1,9 @@
 import asyncio
 import logging
-import netlink
-import netlink.core
-import netlink.genl
-import netlink.genl.capi
+#import netlink
+# import netlink.core
+# import netlink.genl
+# import netlink.genl.capi
 import datetime
 
 from glorpen.desktop_customizer.whereami.hints.simple import WifiHint
@@ -16,10 +16,10 @@ NL80211_ATTR_SSID = 52
 
 NL80211_ATTR_MAX = NL80211_ATTR_SSID
 
-class DumpInterfacesMessage(netlink.core.Message):
-    def __init__(self, family):
-        super().__init__()
-        netlink.genl.capi.genlmsg_put(self._msg, netlink.core.NL_AUTO_PORT, netlink.core.NL_AUTO_SEQ, family, 0, netlink.core.NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0)
+# class DumpInterfacesMessage(netlink.core.Message):
+#     def __init__(self, family):
+#         super().__init__()
+#         netlink.genl.capi.genlmsg_put(self._msg, netlink.core.NL_AUTO_PORT, netlink.core.NL_AUTO_SEQ, family, 0, netlink.core.NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0)
         
 
 class WifiFinder(object):
@@ -47,6 +47,7 @@ class WifiFinder(object):
     
     def connect(self):
         self._infos = []
+        return
         self._cb = netlink.core.Callback()
         self._cb.set_type(netlink.capi.NL_CB_VALID, netlink.capi.NL_CB_CUSTOM, self.nl_message_handler, self._infos)
         self._sk = netlink.core.Socket()
@@ -67,6 +68,7 @@ class WifiFinder(object):
         self._sk.disconnect()
     
     async def poll(self):
+        return
         while self.running:
             try:
                 info = self.query()
