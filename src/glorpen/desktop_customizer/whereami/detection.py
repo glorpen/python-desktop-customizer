@@ -9,7 +9,7 @@ import aiostream.stream
 from glorpen.desktop_customizer.whereami.hints import HostHint, MonitorHint, WifiHint
 from glorpen.desktop_customizer.whereami.host import hostname
 from glorpen.desktop_customizer.whereami.wifi import WifiFinder
-from glorpen.desktop_customizer.whereami.xrand import MonitorDetector
+from glorpen.desktop_customizer.whereami.xrand import MonitorDetector, MonitorInfo
 
 Z = typing.Type['Z']
 
@@ -17,10 +17,11 @@ Z = typing.Type['Z']
 @dataclasses.dataclass
 class DetectionEvent:
     trigger: typing.Optional[type[Z]]
-    state: typing.Dict[type[Z], Z]
+    state: typing.Dict[type[Z], typing.Union[Z, typing.Tuple[Z]]]
 
 
 class DetectionInfo(object):
+    _cache: typing.Dict[type[Z], typing.Optional[typing.Union[Z, typing.Tuple[Z]]]]
 
     def __init__(
             self,
@@ -32,7 +33,7 @@ class DetectionInfo(object):
 
         self._cache = {
             HostHint: None,
-            MonitorHint: None,
+            MonitorInfo: None,
             WifiHint: None,
         }
 
@@ -72,9 +73,17 @@ class DetectionInfo(object):
                 if not bootstrapped and trigger is None:
                     bootstrapped = True
                 if bootstrapped:
+
+                    hints = {}
+                    for k, v in self._cache.items():
+                        if k == MonitorInfo:
+                            hints[MonitorHint] = tuple(i.hint for i in v)
+                        else:
+                            hints[k] = v
+
                     yield DetectionEvent(
                         trigger=trigger,
-                        state=self._cache
+                        state=hints
                     )
 
     async def _watch_wifi(self):
@@ -84,5 +93,5 @@ class DetectionInfo(object):
 
     async def _watch_xrand(self):
         async for info in self._xrand.watch(self._xrand_interval):
-            self._cache[MonitorHint] = info
+            self._cache[MonitorInfo] = info
             yield MonitorHint

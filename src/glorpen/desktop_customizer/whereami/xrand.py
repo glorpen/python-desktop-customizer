@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import datetime
 import logging
 import os
@@ -15,7 +16,6 @@ from glorpen.desktop_customizer.whereami.hints import MonitorHint, ScreenHint, P
 def get_atom_id(con, name):
     return con.core.InternAtom(False, len(name), name).reply().atom
 
-_MonitorDict = typing.Dict[int, MonitorHint]
 
 def create_monitor_hint(output_info, edid: typing.Optional[pyedid.types.Edid]):
     return MonitorHint(
@@ -47,6 +47,13 @@ def create_screen_hint(crtc_info):
         rotation=rotation_to_degrees(crtc_info.rotation),
     )
 
+
+@dataclasses.dataclass
+class MonitorInfo:
+    output: int
+    hint: MonitorHint
+
+_MonitorDict = typing.Dict[int, MonitorInfo]
 
 class MonitorDetector(object):
     running = False
@@ -90,9 +97,6 @@ class MonitorDetector(object):
         return pyedid.parse_edid(d)
 
     def query(self):
-        return tuple(dict(self._query_monitors()).values())
-
-    def _query_monitors(self):
         screen_resources = self._ext_r.GetScreenResources(self._root).reply()
 
         for output in screen_resources.outputs:
@@ -111,7 +115,7 @@ class MonitorDetector(object):
                 physical_info.screen = create_screen_hint(crtc_info)
                 # self._output_info[output] = screen_info
 
-            yield output, physical_info
+            yield MonitorInfo(output=output, hint=physical_info)
 
     async def handle_event(self, ev, items: _MonitorDict):
         # self.logger.debug(ev.__dict__)
@@ -138,7 +142,7 @@ class MonitorDetector(object):
                     crtc_info = self._ext_r.GetCrtcInfo(output_info.crtc, 0).reply()
                     pi.screen = create_screen_hint(crtc_info)
 
-            items[output] = pi
+            items[output] = MonitorInfo(output=output, hint=pi)
             return items
 
         elif ev.subCode == xcffib.randr.Notify.CrtcChange:
@@ -146,17 +150,17 @@ class MonitorDetector(object):
             crtc_info = self._ext_r.GetCrtcInfo(ev.u.cc.crtc, 0).reply()
             if ev.u.cc.mode > 0:
                 for output in crtc_info.outputs:
-                    items[output].screen = create_screen_hint(crtc_info)
+                    items[output].hint.screen = create_screen_hint(crtc_info)
             else:
                 for output in crtc_info.outputs:
-                    items[output].screen = None
+                    items[output].hint.screen = None
 
             return items
 
     async def watch(self, interval: datetime.timedelta):
         self.connect()
 
-        items = dict(self._query_monitors())
+        items = dict((m.output, m) for m in self.query())
 
         yield tuple(items.values())
         # yield (MonitorHint, self._physical_info)
